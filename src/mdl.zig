@@ -98,6 +98,25 @@ pub const Schedule = struct {
         }
     }
 
+    pub fn isFree(self: Schedule, hour: usize, course: *const Course) bool {
+        const class__lesson = self.hour__class__lesson[hour];
+
+        for (course.classes) |class_ix| {
+            if (class__lesson[class_ix]) |blocking_lesson| {
+                std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    pub fn insertLesson(self: *Schedule, hour: usize, course: *const Course, lesson_ix: ?Lesson.Ix) void {
+        const class__lesson = self.hour__class__lesson[hour];
+        for (course.classes) |class_ix|
+            class__lesson[class_ix] = lesson_ix;
+    }
+
     pub fn write(self: Self, model: Model) void {
         std.debug.print("\t\t", .{});
         for (model.classes) |class| {

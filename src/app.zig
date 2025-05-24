@@ -68,20 +68,16 @@ pub const App = struct {
         const course = &self.model.courses[lesson.course_ix];
         std.debug.print("Fitting Lesson {} {any}\n", .{ lesson_ix, lesson });
         for (0..self.hours_per_week) |hour| {
-            var class__lesson = schedule.hour__class__lesson[hour];
-            var is_free: bool = true;
-            for (course.classes) |class_ix| {
-                if (class__lesson[class_ix]) |blocking_lesson| {
-                    std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
-                    is_free = false;
-                    break;
-                }
-            }
-            if (is_free) {
-                std.debug.print("\tCould fit Lesson {} in Hour {}\n", .{ lesson_ix, hour });
-                for (course.classes) |class_ix|
-                    class__lesson[class_ix] = lesson_ix;
-                return self.fit_(lessons[1..], schedule);
+            if (schedule.isFree(hour, course)) {
+                std.debug.print("\tCould fit Course {} in Hour {}\n", .{ lesson.course_ix, hour });
+
+                schedule.insertLesson(hour, course, lesson_ix);
+
+                if (self.fit_(lessons[1..], schedule))
+                    return true;
+
+                // Recursive fit_() failed: erase lesson and continue the search
+                schedule.insertLesson(hour, course, null);
             }
         }
 
