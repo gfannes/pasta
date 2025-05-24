@@ -1,0 +1,163 @@
+const std = @import("std");
+const rubr = @import("rubr");
+
+pub const Count = struct {
+    classes: usize = 0,
+    groups: usize = 0,
+    courses: usize = 0,
+    lessons: usize = 0,
+};
+
+pub const Model = struct {
+    const Self = @This();
+
+    a: std.mem.Allocator,
+    classes: []Class = &.{},
+    groups: []Group = &.{},
+    courses: []Course = &.{},
+    lessons: []Lesson = &.{},
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Model{ .a = a };
+    }
+    pub fn deinit(self: *Self) void {
+        for (self.classes) |class|
+            self.a.free(class.courses);
+        self.a.free(self.classes);
+        self.a.free(self.groups);
+        self.a.free(self.courses);
+        self.a.free(self.lessons);
+    }
+    pub fn alloc(self: *Self, count: Count) !void {
+        self.classes = try self.a.alloc(Class, count.classes);
+        @memset(self.classes, .{});
+        self.groups = try self.a.alloc(Group, count.groups);
+        @memset(self.groups, .{});
+        self.courses = try self.a.alloc(Course, count.courses);
+        @memset(self.courses, .{});
+        self.lessons = try self.a.alloc(Lesson, count.lessons);
+        @memset(self.lessons, .{});
+    }
+
+    pub fn write(self: Self) void {
+        for (self.groups, 0..) |group, group_ix| {
+            std.debug.print("Group {s} ({}):", .{ group.name, group.count });
+            for (self.classes) |class| {
+                if (class.group == group_ix)
+                    std.debug.print(" {s} ({})", .{ class.name, class.count });
+            }
+            std.debug.print("\n", .{});
+        }
+        for (self.courses, 0..) |course, course_ix| {
+            std.debug.print("Course {s} ({}h): ", .{ course.name, course.hours });
+            for (self.classes) |class| {
+                if (std.mem.indexOfScalar(Course.Ix, class.courses, course_ix)) |_| {
+                    std.debug.print(" {s}", .{class.name});
+                }
+            }
+            std.debug.print("\n", .{});
+        }
+    }
+};
+
+pub const Schedule = struct {
+    const Self = @This();
+
+    a: std.mem.Allocator,
+    hour__class__lesson: [][]?Lesson.Ix = &.{},
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
+    }
+    pub fn deinit(self: *Self) void {
+        for (self.hour__class__lesson) |e|
+            self.a.free(e);
+        self.a.free(self.hour__class__lesson);
+    }
+    pub fn copy(self: *Self) !Self {
+        var ret = Self.init(self.a);
+        errdefer ret.deinit();
+        ret.hour__class__lesson = try ret.a.alloc([]?Lesson.Ix, self.hour__class__lesson.len);
+        for (ret.hour__class__lesson, 0..) |*dst, ix| {
+            const src = self.hour__class__lesson[ix];
+            dst.* = try ret.a.alloc(?Lesson.Ix, src.len);
+            std.mem.copyForwards(?Lesson.Ix, dst.*, src);
+        }
+        return ret;
+    }
+    pub fn alloc(self: *Self, hours: usize, classes: usize) !void {
+        self.hour__class__lesson = try self.a.alloc([]?Lesson.Ix, hours);
+        for (self.hour__class__lesson) |*class__lesson| {
+            class__lesson.* = try self.a.alloc(?Lesson.Ix, classes);
+            @memset(class__lesson.*, null);
+        }
+    }
+
+    pub fn write(self: Self, model: Model) void {
+        std.debug.print("\t\t", .{});
+        for (model.classes) |class| {
+            std.debug.print("|\t{s}\t", .{class.name});
+        }
+        std.debug.print("\n", .{});
+        for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
+            std.debug.print("\t{}\t", .{hour_ix});
+            for (class__lesson, 0..) |lesson_ix, class_ix| {
+                _ = class_ix;
+                std.debug.print("|\t", .{});
+                if (lesson_ix) |ix| {
+                    const lesson = model.lessons[ix];
+                    const course = model.courses[lesson.course_ix];
+                    std.debug.print("{s}-{}", .{ course.name, lesson.hour });
+                }
+                std.debug.print("\t", .{});
+            }
+            std.debug.print("\n", .{});
+        }
+    }
+};
+
+pub const Class = struct {
+    const Self = @This();
+    pub const Ix = usize;
+
+    name: []const u8 = &.{},
+    group: Group.Ix = 0,
+    count: usize = 0,
+    courses: []Course.Ix = &.{},
+};
+
+pub const Group = struct {
+    const Self = @This();
+    pub const Ix = usize;
+
+    name: []const u8 = &.{},
+    count: usize = 0,
+};
+
+pub const Course = struct {
+    const Self = @This();
+    pub const Ix = usize;
+
+    name: []const u8 = &.{},
+    hours: usize = 0,
+};
+
+pub const Section = struct {
+    const Self = @This();
+};
+
+pub const Lesson = struct {
+    const Self = @This();
+    pub const Ix = usize;
+
+    course_ix: Course.Ix = 0,
+    hour: usize = 0,
+};
+
+pub const Hour = struct {
+    const Self = @This();
+};
+
+pub const Constraint = struct {
+    const Self = @This();
+};
