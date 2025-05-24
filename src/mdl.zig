@@ -24,8 +24,13 @@ pub const Model = struct {
         for (self.classes) |class|
             self.a.free(class.courses);
         self.a.free(self.classes);
+
         self.a.free(self.groups);
+
+        for (self.courses) |course|
+            self.a.free(course.classes);
         self.a.free(self.courses);
+
         self.a.free(self.lessons);
     }
     pub fn alloc(self: *Self, count: Count) !void {
@@ -140,6 +145,7 @@ pub const Course = struct {
 
     name: []const u8 = &.{},
     hours: usize = 0,
+    classes: []Class.Ix = &.{},
 };
 
 pub const Section = struct {

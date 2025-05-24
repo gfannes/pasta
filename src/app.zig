@@ -21,7 +21,7 @@ pub const App = struct {
         return Self{
             .a = a,
             // &todo: set to 32
-            .hours_per_week = 4,
+            .hours_per_week = 7,
             // &todo: set to 26
             .classroom_capacity = 10,
             .lesson_table = csv.Table.init(a),
@@ -52,7 +52,42 @@ pub const App = struct {
         const lessons_to_fit = self.deriveLessonsToFit(all_lessons);
         std.debug.print("Lessons to fit {any}\n", .{lessons_to_fit});
 
-        return schedule;
+        if (self.fit_(all_lessons, &schedule))
+            return schedule;
+
+        schedule.deinit();
+        return null;
+    }
+
+    fn fit_(self: Self, lessons: []mdl.Lesson.Ix, schedule: *mdl.Schedule) bool {
+        if (lessons.len == 0)
+            return true;
+
+        const lesson_ix = lessons[0];
+        const lesson = &self.model.lessons[lesson_ix];
+        const course = &self.model.courses[lesson.course_ix];
+        std.debug.print("Fitting Lesson {} {any}\n", .{ lesson_ix, lesson });
+        for (0..self.hours_per_week) |hour| {
+            var class__lesson = schedule.hour__class__lesson[hour];
+            var is_free: bool = true;
+            for (course.classes) |class_ix| {
+                if (class__lesson[class_ix]) |blocking_lesson| {
+                    std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
+                    is_free = false;
+                    break;
+                }
+            }
+            if (is_free) {
+                std.debug.print("\tCould fit Lesson {} in Hour {}\n", .{ lesson_ix, hour });
+                for (course.classes) |class_ix|
+                    class__lesson[class_ix] = lesson_ix;
+                return self.fit_(lessons[1..], schedule);
+            }
+        }
+
+        schedule.write(self.model);
+        std.debug.print("Could not find a fit\n", .{});
+        return false;
     }
 
     fn deriveLessonsToFit(self: Self, all_lessons: []mdl.Lesson.Ix) []mdl.Lesson.Ix {
@@ -194,15 +229,31 @@ pub const App = struct {
                     defer lesson_ix += 1;
                     self.model.lessons[lesson_ix] = mdl.Lesson{ .course_ix = course_ix, .hour = hour };
                 }
+
+                var class_count: usize = 0;
                 for (class__col, 0..) |col_ix, class_ix| {
                     if (row[col_ix].int) |int| {
                         if (int != 1) {
                             std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
                             return Error.FormatError;
                         }
+                        class_count += 1;
                         const class = &self.model.classes[class_ix];
                         class.courses.len += 1;
                         class.courses[class.courses.len - 1] = course_ix;
+                    }
+                }
+
+                course.classes = try self.a.alloc(mdl.Class.Ix, class_count);
+                course.classes.len = 0;
+                for (class__col, 0..) |col_ix, class_ix| {
+                    if (row[col_ix].int) |int| {
+                        if (int != 1) {
+                            std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
+                            return Error.FormatError;
+                        }
+                        course.classes.len += 1;
+                        course.classes[course.classes.len - 1] = class_ix;
                     }
                 }
             }

@@ -11,16 +11,21 @@ Software to determine a minimal set of Sequences of interdependent Courses. Thes
 
 # WBS
 ## Input
-- Info on Classes, Groups, Courses and Constraints from a single `.csv` file
-- Maximum Section capacity
-- An optional Schedule that must be used as starting point
+- [x] Info on Classes, Groups, Courses and Constraints from a single `.csv` file
+- [x] Maximum Section capacity
+- [ ] An optional Schedule that must be used as starting point
 ## Output
-- A list of Schedules in `.csv` format, with a score
+- [x] Terminal print-out
+- [ ] A list of Schedules in `.csv` format, with a score
 ## Processing
-- Determing sizes for data structures
-- Create data structures
-- Load data from input
-- Process recursively
+- [x] Determing sizes for data structures
+- [x] Create data structures
+- [x] Load data from input
+- [/] Process recursively
+	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
+	- [ ] Try all available slots
+- [ ] Convert Courses into Sections
+	- For now, a Course is treated as a Section
 - Sort solutions by score
 - Write-out solutions with score
 
