@@ -1,0 +1,7 @@
+﻿type,,,class,class,class
+,name,,a,b,class
+,,count,10,20,5
+group,A,15,1,,1
+group,B,20,,1,
+course,wisk,5,1,,1
+course,ned,4,1,1,1
