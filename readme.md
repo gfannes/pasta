@@ -2,6 +2,8 @@
 
 Software to determine a minimal set of Sequences of interdependent Courses. These Sequences are the input for creating an actual Schedule.
 
+https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhvvxc/edit?gid=0#gid=0
+
 # Rationale
 - Produce a Schedule with a minimal amount of Lessons filled-in. Unspecified Lessons translate in more freedom later when a complete and specific Schedule is produced.
 - Lessons for Sections that are given to Classes belonging to different Groups must be present in the Schedule.
@@ -24,7 +26,7 @@ Software to determine a minimal set of Sequences of interdependent Courses. Thes
 - [/] Process recursively
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [ ] Try all available slots
-- [ ] Split Courses into Sections
+- [*] Split Courses into Sections
 	- For now, a Course is treated as a Section
 - [ ] Take Constraints into account
 - Sort solutions by score

@@ -1,11 +1,11 @@
 const std = @import("std");
-const rubr = @import("rubr");
+const rubr = @import("rubr.zig");
 
 pub const Count = struct {
     classes: usize = 0,
     groups: usize = 0,
     courses: usize = 0,
-    lessons: usize = 0,
+    sections: usize = 0,
 };
 
 pub const Model = struct {
@@ -15,6 +15,7 @@ pub const Model = struct {
     classes: []Class = &.{},
     groups: []Group = &.{},
     courses: []Course = &.{},
+    sections: []Section = &.{},
     lessons: []Lesson = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -31,6 +32,10 @@ pub const Model = struct {
             self.a.free(course.classes);
         self.a.free(self.courses);
 
+        for (self.sections) |section|
+            self.a.free(section.classes);
+        self.a.free(self.sections);
+
         self.a.free(self.lessons);
     }
     pub fn alloc(self: *Self, count: Count) !void {
@@ -40,26 +45,29 @@ pub const Model = struct {
         @memset(self.groups, .{});
         self.courses = try self.a.alloc(Course, count.courses);
         @memset(self.courses, .{});
-        self.lessons = try self.a.alloc(Lesson, count.lessons);
-        @memset(self.lessons, .{});
     }
 
     pub fn write(self: Self) void {
-        for (self.groups, 0..) |group, group_ix| {
+        for (self.groups, 0..) |group, _group_ix| {
+            const group_ix = Group.Ix.init(_group_ix);
+
             std.debug.print("Group '{s}' ({}):", .{ group.name, group.count });
             for (self.classes) |class| {
-                if (class.group == group_ix)
+                if (class.group.eql(group_ix))
                     std.debug.print(" {s} ({})", .{ class.name, class.count });
             }
             std.debug.print("\n", .{});
         }
-        for (self.courses, 0..) |course, course_ix| {
+        for (self.courses) |course| {
             std.debug.print("Course '{s}' ({}h): ", .{ course.name, course.hours });
-            for (self.classes) |class| {
-                if (std.mem.indexOfScalar(Course.Ix, class.courses, course_ix)) |_| {
-                    std.debug.print(" {s}", .{class.name});
-                }
-            }
+            for (course.classes) |class_ix|
+                std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
+            std.debug.print("\n", .{});
+        }
+        for (self.sections) |section| {
+            std.debug.print("Section for Course '{s}' ({}): ", .{ section.course.cptr(self.courses).name, section.students });
+            for (section.classes) |class_ix|
+                std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
             std.debug.print("\n", .{});
         }
     }
@@ -98,11 +106,11 @@ pub const Schedule = struct {
         }
     }
 
-    pub fn isFree(self: Schedule, hour: usize, course: *const Course) bool {
+    pub fn isFree(self: Schedule, hour: usize, section: *const Section) bool {
         const class__lesson = self.hour__class__lesson[hour];
 
-        for (course.classes) |class_ix| {
-            if (class__lesson[class_ix]) |blocking_lesson| {
+        for (section.classes) |class_ix| {
+            if (class__lesson[class_ix.ix]) |blocking_lesson| {
                 _ = blocking_lesson;
                 // std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
                 return false;
@@ -112,10 +120,10 @@ pub const Schedule = struct {
         return true;
     }
 
-    pub fn insertLesson(self: *Schedule, hour: usize, course: *const Course, lesson_ix: ?Lesson.Ix) void {
+    pub fn insertLesson(self: *Schedule, hour: usize, section: *const Section, lesson_ix: ?Lesson.Ix) void {
         const class__lesson = self.hour__class__lesson[hour];
-        for (course.classes) |class_ix|
-            class__lesson[class_ix] = lesson_ix;
+        for (section.classes) |class_ix|
+            class__lesson[class_ix.ix] = lesson_ix;
     }
 
     pub fn write(self: Self, model: Model) !void {
@@ -123,8 +131,9 @@ pub const Schedule = struct {
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |lesson_ix| {
                 if (lesson_ix) |ix| {
-                    const lesson = model.lessons[ix];
-                    const course = model.courses[lesson.course_ix];
+                    const lesson = ix.cptr(model.lessons);
+                    const section = lesson.section.cptr(model.sections);
+                    const course = section.course.cptr(model.courses);
                     max_width = @max(max_width, course.name.len + 2);
                 }
             }
@@ -168,8 +177,9 @@ pub const Schedule = struct {
             for (class__lesson, 0..) |lesson_ix, class_ix| {
                 _ = class_ix;
                 if (lesson_ix) |ix| {
-                    const lesson = model.lessons[ix];
-                    const course = model.courses[lesson.course_ix];
+                    const lesson = ix.cptr(model.lessons);
+                    const section = lesson.section.cptr(model.sections);
+                    const course = section.course.cptr(model.courses);
                     line.print("{s}-{}", .{ course.name, lesson.hour });
                 } else {
                     line.print("", .{});
@@ -181,17 +191,17 @@ pub const Schedule = struct {
 
 pub const Class = struct {
     const Self = @This();
-    pub const Ix = usize;
+    pub const Ix = rubr.index.Ix(Class);
 
     name: []const u8 = &.{},
-    group: Group.Ix = 0,
+    group: Group.Ix = .{},
     count: usize = 0,
     courses: []Course.Ix = &.{},
 };
 
 pub const Group = struct {
     const Self = @This();
-    pub const Ix = usize;
+    pub const Ix = rubr.index.Ix(Group);
 
     name: []const u8 = &.{},
     count: usize = 0,
@@ -199,7 +209,7 @@ pub const Group = struct {
 
 pub const Course = struct {
     const Self = @This();
-    pub const Ix = usize;
+    pub const Ix = rubr.index.Ix(Course);
 
     name: []const u8 = &.{},
     hours: usize = 0,
@@ -208,13 +218,18 @@ pub const Course = struct {
 
 pub const Section = struct {
     const Self = @This();
+    pub const Ix = rubr.index.Ix(Section);
+
+    course: Course.Ix,
+    students: usize = 0,
+    classes: []Class.Ix = &.{},
 };
 
 pub const Lesson = struct {
     const Self = @This();
-    pub const Ix = usize;
+    pub const Ix = rubr.index.Ix(Lesson);
 
-    course_ix: Course.Ix = 0,
+    section: Section.Ix = .{},
     hour: usize = 0,
 };
 
