@@ -10,7 +10,7 @@ pub fn main() !void {
 
     var config = cfg.Config.init(a);
     defer config.deinit();
-    config.lesson_fp = "/home/geertf/pier/test.csv";
+    config.lesson_fp = "/home/geertf/pier/test5.csv";
 
     var app = App.init(a);
     defer app.deinit();
@@ -21,6 +21,6 @@ pub fn main() !void {
     var maybe_schedule = try app.fit();
     if (maybe_schedule) |*schedule| {
         defer schedule.deinit();
-        schedule.write(app.model);
+        try schedule.write(app.model);
     }
 }

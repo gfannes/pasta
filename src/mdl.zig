@@ -46,7 +46,7 @@ pub const Model = struct {
 
     pub fn write(self: Self) void {
         for (self.groups, 0..) |group, group_ix| {
-            std.debug.print("Group {s} ({}):", .{ group.name, group.count });
+            std.debug.print("Group '{s}' ({}):", .{ group.name, group.count });
             for (self.classes) |class| {
                 if (class.group == group_ix)
                     std.debug.print(" {s} ({})", .{ class.name, class.count });
@@ -54,7 +54,7 @@ pub const Model = struct {
             std.debug.print("\n", .{});
         }
         for (self.courses, 0..) |course, course_ix| {
-            std.debug.print("Course {s} ({}h): ", .{ course.name, course.hours });
+            std.debug.print("Course '{s}' ({}h): ", .{ course.name, course.hours });
             for (self.classes) |class| {
                 if (std.mem.indexOfScalar(Course.Ix, class.courses, course_ix)) |_| {
                     std.debug.print(" {s}", .{class.name});
@@ -103,7 +103,8 @@ pub const Schedule = struct {
 
         for (course.classes) |class_ix| {
             if (class__lesson[class_ix]) |blocking_lesson| {
-                std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
+                _ = blocking_lesson;
+                // std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
                 return false;
             }
         }
@@ -117,25 +118,63 @@ pub const Schedule = struct {
             class__lesson[class_ix] = lesson_ix;
     }
 
-    pub fn write(self: Self, model: Model) void {
-        std.debug.print("\t\t", .{});
-        for (model.classes) |class| {
-            std.debug.print("|\t{s}\t", .{class.name});
-        }
-        std.debug.print("\n", .{});
-        for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
-            std.debug.print("\t{}\t", .{hour_ix});
-            for (class__lesson, 0..) |lesson_ix, class_ix| {
-                _ = class_ix;
-                std.debug.print("|\t", .{});
+    pub fn write(self: Self, model: Model) !void {
+        var max_width: usize = 0;
+        for (self.hour__class__lesson) |class__lesson| {
+            for (class__lesson) |lesson_ix| {
                 if (lesson_ix) |ix| {
                     const lesson = model.lessons[ix];
                     const course = model.courses[lesson.course_ix];
-                    std.debug.print("{s}-{}", .{ course.name, lesson.hour });
+                    max_width = @max(max_width, course.name.len + 2);
                 }
-                std.debug.print("\t", .{});
             }
-            std.debug.print("\n", .{});
+        }
+
+        const Line = struct {
+            const My = @This();
+            a: std.mem.Allocator,
+            width: usize,
+            buf: []u8 = &.{},
+            fn init(width: usize, a: std.mem.Allocator) !My {
+                std.debug.print("|", .{});
+                return My{ .a = a, .width = width, .buf = try a.alloc(u8, width) };
+            }
+            fn deinit(my: *My) void {
+                std.debug.print("\n", .{});
+                my.a.free(my.buf);
+            }
+            fn print(my: *My, comptime fmt: []const u8, options: anytype) void {
+                for (my.buf) |*ch|
+                    ch.* = ' ';
+                _ = std.fmt.bufPrint(my.buf, fmt, options) catch {};
+                std.debug.print(" {s} |", .{my.buf});
+            }
+        };
+
+        {
+            var line = try Line.init(max_width, self.a);
+            defer line.deinit();
+            line.print("", .{});
+            for (model.classes) |class| {
+                line.print("{s}", .{class.name});
+            }
+        }
+
+        for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
+            var line = try Line.init(max_width, self.a);
+            defer line.deinit();
+            // _ = hour_ix;
+            line.print("{}", .{hour_ix});
+            for (class__lesson, 0..) |lesson_ix, class_ix| {
+                _ = class_ix;
+                if (lesson_ix) |ix| {
+                    const lesson = model.lessons[ix];
+                    const course = model.courses[lesson.course_ix];
+                    line.print("{s}-{}", .{ course.name, lesson.hour });
+                } else {
+                    line.print("", .{});
+                }
+            }
         }
     }
 };

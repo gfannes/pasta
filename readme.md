@@ -24,8 +24,9 @@ Software to determine a minimal set of Sequences of interdependent Courses. Thes
 - [/] Process recursively
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [ ] Try all available slots
-- [ ] Convert Courses into Sections
+- [ ] Split Courses into Sections
 	- For now, a Course is treated as a Section
+- [ ] Take Constraints into account
 - Sort solutions by score
 - Write-out solutions with score
 

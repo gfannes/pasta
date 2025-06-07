@@ -21,9 +21,9 @@ pub const App = struct {
         return Self{
             .a = a,
             // &todo: set to 32
-            .hours_per_week = 7,
+            .hours_per_week = 40,
             // &todo: set to 26
-            .classroom_capacity = 10,
+            .classroom_capacity = 26,
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
         };
@@ -52,7 +52,7 @@ pub const App = struct {
         const lessons_to_fit = self.deriveLessonsToFit(all_lessons);
         std.debug.print("Lessons to fit {any}\n", .{lessons_to_fit});
 
-        if (self.fit_(all_lessons, &schedule))
+        if (self.fit_(lessons_to_fit, &schedule))
             return schedule;
 
         schedule.deinit();
@@ -66,10 +66,10 @@ pub const App = struct {
         const lesson_ix = lessons[0];
         const lesson = &self.model.lessons[lesson_ix];
         const course = &self.model.courses[lesson.course_ix];
-        std.debug.print("Fitting Lesson {} {any}\n", .{ lesson_ix, lesson });
+        // std.debug.print("{} Fitting Lesson {} {any}\n", .{ lessons.len, lesson_ix, lesson });
         for (0..self.hours_per_week) |hour| {
             if (schedule.isFree(hour, course)) {
-                std.debug.print("\tCould fit Course {} in Hour {}\n", .{ lesson.course_ix, hour });
+                // std.debug.print("\tCould fit Course {} in Hour {}\n", .{ lesson.course_ix, hour });
 
                 schedule.insertLesson(hour, course, lesson_ix);
 
@@ -81,8 +81,8 @@ pub const App = struct {
             }
         }
 
-        schedule.write(self.model);
-        std.debug.print("Could not find a fit\n", .{});
+        // schedule.write(self.model);
+        // std.debug.print("Could not find a fit\n", .{});
         return false;
     }
 
@@ -183,13 +183,14 @@ pub const App = struct {
             }
 
             var course_count: usize = 0;
-            for (course__row) |row_ix| {
+            for (course__row, 0..) |row_ix, course_ix| {
                 if (self.lesson_table.rows[row_ix][col_ix].int) |int| {
-                    if (int != 1) {
-                        std.debug.print("Error: please use '1' to indicate that a Class follows a Course\n", .{});
+                    if (int != 1 and int != 0) {
+                        const course = &self.model.courses[course_ix];
+                        std.debug.print("Error: please use a '1' to indicate that Class '{s}' follows Course '{s}'\n", .{ class.name, course.name });
                         return Error.FormatError;
                     }
-                    course_count += 1;
+                    course_count += @intCast(int);
                 }
             }
             class.courses = try self.a.alloc(mdl.Course.Ix, course_count);
@@ -229,14 +230,20 @@ pub const App = struct {
                 var class_count: usize = 0;
                 for (class__col, 0..) |col_ix, class_ix| {
                     if (row[col_ix].int) |int| {
-                        if (int != 1) {
-                            std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
-                            return Error.FormatError;
+                        switch (int) {
+                            0 => {},
+                            1 => {
+                                class_count += 1;
+                                const class = &self.model.classes[class_ix];
+                                class.courses.len += 1;
+                                class.courses[class.courses.len - 1] = course_ix;
+                            },
+                            else => {
+                                const class_name = self.lesson_table.rows[1][col_ix].str;
+                                std.debug.print("Error: please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
+                                return Error.FormatError;
+                            },
                         }
-                        class_count += 1;
-                        const class = &self.model.classes[class_ix];
-                        class.courses.len += 1;
-                        class.courses[class.courses.len - 1] = course_ix;
                     }
                 }
 
@@ -244,12 +251,18 @@ pub const App = struct {
                 course.classes.len = 0;
                 for (class__col, 0..) |col_ix, class_ix| {
                     if (row[col_ix].int) |int| {
-                        if (int != 1) {
-                            std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
-                            return Error.FormatError;
+                        switch (int) {
+                            0 => {},
+                            1 => {
+                                course.classes.len += 1;
+                                course.classes[course.classes.len - 1] = class_ix;
+                            },
+                            else => {
+                                const class_name = self.lesson_table.rows[1][col_ix].str;
+                                std.debug.print("Error: please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
+                                return Error.FormatError;
+                            },
                         }
-                        course.classes.len += 1;
-                        course.classes[course.classes.len - 1] = class_ix;
                     }
                 }
             }
