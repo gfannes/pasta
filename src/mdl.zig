@@ -26,6 +26,8 @@ pub const Model = struct {
             self.a.free(class.courses);
         self.a.free(self.classes);
 
+        for (self.groups) |group|
+            self.a.free(group.classes);
         self.a.free(self.groups);
 
         for (self.courses) |course|
@@ -51,7 +53,10 @@ pub const Model = struct {
         for (self.groups, 0..) |group, _group_ix| {
             const group_ix = Group.Ix.init(_group_ix);
 
-            std.debug.print("Group '{s}' ({}):", .{ group.name, group.count });
+            var count: usize = 0;
+            for (group.classes) |class_ix|
+                count += class_ix.cptr(self.classes).count;
+            std.debug.print("Group '{s}' ({}):", .{ group.name, count });
             for (self.classes) |class| {
                 if (class.group.eql(group_ix))
                     std.debug.print(" {s} ({})", .{ class.name, class.count });
@@ -164,8 +169,11 @@ pub const Schedule = struct {
             var line = try Line.init(max_width, self.a);
             defer line.deinit();
             line.print("", .{});
-            for (model.classes) |class| {
-                line.print("{s}", .{class.name});
+            for (model.groups) |group| {
+                for (group.classes) |class_ix| {
+                    const class = class_ix.cptr(model.classes);
+                    line.print("{s} {}", .{ class.name, class.group.ix });
+                }
             }
         }
 
@@ -174,15 +182,17 @@ pub const Schedule = struct {
             defer line.deinit();
             // _ = hour_ix;
             line.print("{}", .{hour_ix});
-            for (class__lesson, 0..) |lesson_ix, class_ix| {
-                _ = class_ix;
-                if (lesson_ix) |ix| {
-                    const lesson = ix.cptr(model.lessons);
-                    const section = lesson.section.cptr(model.sections);
-                    const course = section.course.cptr(model.courses);
-                    line.print("{s}-{}", .{ course.name, lesson.hour });
-                } else {
-                    line.print("", .{});
+            for (model.groups) |group| {
+                for (group.classes) |class_ix| {
+                    const lesson_ix = class__lesson[class_ix.ix];
+                    if (lesson_ix) |ix| {
+                        const lesson = ix.cptr(model.lessons);
+                        const section = lesson.section.cptr(model.sections);
+                        const course = section.course.cptr(model.courses);
+                        line.print("{s}-{}", .{ course.name, lesson.hour });
+                    } else {
+                        line.print("", .{});
+                    }
                 }
             }
         }
@@ -204,7 +214,8 @@ pub const Group = struct {
     pub const Ix = rubr.index.Ix(Group);
 
     name: []const u8 = &.{},
-    count: usize = 0,
+    classes: []Class.Ix = &.{},
+    class_mask: u64 = 0,
 };
 
 pub const Course = struct {
@@ -214,6 +225,7 @@ pub const Course = struct {
     name: []const u8 = &.{},
     hours: usize = 0,
     classes: []Class.Ix = &.{},
+    class_mask: u64 = 0,
 };
 
 pub const Section = struct {
@@ -223,6 +235,7 @@ pub const Section = struct {
     course: Course.Ix,
     students: usize = 0,
     classes: []Class.Ix = &.{},
+    class_mask: u64 = 0,
 };
 
 pub const Lesson = struct {
@@ -235,6 +248,8 @@ pub const Lesson = struct {
 
 pub const Hour = struct {
     const Self = @This();
+
+    class_mask: u64 = 0,
 };
 
 pub const Constraint = struct {

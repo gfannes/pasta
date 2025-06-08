@@ -23,14 +23,19 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Determing sizes for data structures
 - [x] Create data structures
 - [x] Load data from input
+- [x] Split Courses into Sections
+	- For now, a Course is treated as a Section
+	- [ ] Combine Classes over different Groups when not full yet
+- [/] Fit Lessons that belong to a Section that is not given to the whole Group
 - [/] Process recursively
+	- [ ] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [ ] Try all available slots
-- [*] Split Courses into Sections
-	- For now, a Course is treated as a Section
-- [ ] Take Constraints into account
 - Sort solutions by score
 - Write-out solutions with score
+- [x] Do not add classes with 0 students
+- [x] Sort classes per group
+- [ ] Take Constraints into account
 
 # Terms
 

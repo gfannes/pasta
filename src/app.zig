@@ -6,6 +6,7 @@ const mdl = @import("mdl.zig");
 pub const Error = error{
     FormatError,
     GroupMismatch,
+    TooManyClasses,
 };
 
 pub const App = struct {
@@ -134,9 +135,13 @@ pub const App = struct {
     fn deriveCounts(lesson_table: csv.Table) mdl.Count {
         var count = mdl.Count{};
 
-        for (lesson_table.rows[0][2..]) |cell| {
-            if (std.mem.eql(u8, cell.str, "class"))
-                count.classes += 1;
+        for (lesson_table.rows[0][3..], 3..) |cell, ix| {
+            if (std.mem.eql(u8, cell.str, "class")) {
+                if (lesson_table.rows[2][ix].int) |int| {
+                    if (int > 0)
+                        count.classes += 1;
+                }
+            }
         }
         for (lesson_table.rows[2..]) |row| {
             if (std.mem.eql(u8, row[0].str, "group"))
@@ -153,14 +158,21 @@ pub const App = struct {
     }
 
     fn loadData(self: *Self) !void {
+        if (self.count.classes > 64)
+            return Error.TooManyClasses;
+
         var class__col = try self.a.alloc(usize, self.count.classes);
         defer self.a.free(class__col);
         {
             var class_ix: usize = 0;
-            for (self.lesson_table.rows[0], 0..) |cell, col_ix| {
+            for (self.lesson_table.rows[0][3..], 3..) |cell, col_ix| {
                 if (std.mem.eql(u8, cell.str, "class")) {
-                    defer class_ix += 1;
-                    class__col[class_ix] = col_ix;
+                    if (self.lesson_table.rows[2][col_ix].int) |int| {
+                        if (int > 0) {
+                            defer class_ix += 1;
+                            class__col[class_ix] = col_ix;
+                        }
+                    }
                 }
             }
             std.debug.assert(class_ix == self.count.classes);
@@ -224,9 +236,9 @@ pub const App = struct {
                             std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
                             return Error.FormatError;
                         }
+                        group.class_mask |= @as(u64, 1) << @intCast(class_ix);
                         const class = &self.model.classes[class_ix];
                         class.group = mdl.Group.Ix.init(group_ix);
-                        group.count += class.count;
                     }
                 }
             }
@@ -242,6 +254,7 @@ pub const App = struct {
                         switch (int) {
                             0 => {},
                             1 => {
+                                course.class_mask |= @as(u64, 1) << @intCast(class_ix);
                                 class_count += 1;
                                 const class = &self.model.classes[class_ix];
                                 class.courses.len += 1;
@@ -276,6 +289,22 @@ pub const App = struct {
                 }
             }
         }
+
+        for (self.model.groups, 0..) |*group, gix| {
+            var count: usize = 0;
+            for (self.model.classes) |class| {
+                if (class.group.ix == gix)
+                    count += 1;
+            }
+            group.classes = try self.a.alloc(mdl.Class.Ix, count);
+            group.classes.len = 0;
+            for (self.model.classes, 0..) |class, class_ix| {
+                if (class.group.ix == gix) {
+                    group.classes.len += 1;
+                    group.classes[group.classes.len - 1] = mdl.Class.Ix.init(class_ix);
+                }
+            }
+        }
     }
 
     fn splitCourses(self: *Self) !void {
@@ -293,6 +322,7 @@ pub const App = struct {
                 for (sections.items[sections_start..]) |*section| {
                     const first_class = section.classes[0].cptr(self.model.classes);
                     if (first_class.group.eql(class.group)) {
+                        section.class_mask |= @as(u64, 1) << @intCast(class_ix.ix);
                         section.students += class.count;
                         section.classes.len += 1;
                         section.classes[section.classes.len - 1] = class_ix;
@@ -300,9 +330,9 @@ pub const App = struct {
                     }
                 }
                 if (!could_add) {
-                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .students = class.count, .classes = try self.a.alloc(mdl.Class.Ix, course.classes.len) };
-                    section.classes[0] = class_ix;
+                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .students = class.count, .classes = try self.a.alloc(mdl.Class.Ix, course.classes.len), .class_mask = @as(u64, 1) << @intCast(class_ix.ix) };
                     section.classes.len = 1;
+                    section.classes[section.classes.len - 1] = class_ix;
                     try sections.append(section);
                 }
             }
