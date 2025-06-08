@@ -236,7 +236,7 @@ pub const App = struct {
                             std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
                             return Error.FormatError;
                         }
-                        group.class_mask |= @as(u64, 1) << @intCast(class_ix);
+                        group.classes.add(class_ix);
                         const class = &self.model.classes[class_ix];
                         class.group = mdl.Group.Ix.init(group_ix);
                     }
@@ -254,7 +254,7 @@ pub const App = struct {
                         switch (int) {
                             0 => {},
                             1 => {
-                                course.class_mask |= @as(u64, 1) << @intCast(class_ix);
+                                course.classes.add(class_ix);
                                 class_count += 1;
                                 const class = &self.model.classes[class_ix];
                                 class.courses.len += 1;
@@ -268,41 +268,6 @@ pub const App = struct {
                         }
                     }
                 }
-
-                course.classes = try self.a.alloc(mdl.Class.Ix, class_count);
-                course.classes.len = 0;
-                for (class__col, 0..) |col_ix, class_ix| {
-                    if (row[col_ix].int) |int| {
-                        switch (int) {
-                            0 => {},
-                            1 => {
-                                course.classes.len += 1;
-                                course.classes[course.classes.len - 1] = mdl.Class.Ix.init(class_ix);
-                            },
-                            else => {
-                                const class_name = self.lesson_table.rows[1][col_ix].str;
-                                std.debug.print("Error: please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
-                                return Error.FormatError;
-                            },
-                        }
-                    }
-                }
-            }
-        }
-
-        for (self.model.groups, 0..) |*group, gix| {
-            var count: usize = 0;
-            for (self.model.classes) |class| {
-                if (class.group.ix == gix)
-                    count += 1;
-            }
-            group.classes = try self.a.alloc(mdl.Class.Ix, count);
-            group.classes.len = 0;
-            for (self.model.classes, 0..) |class, class_ix| {
-                if (class.group.ix == gix) {
-                    group.classes.len += 1;
-                    group.classes[group.classes.len - 1] = mdl.Class.Ix.init(class_ix);
-                }
             }
         }
     }
@@ -315,24 +280,22 @@ pub const App = struct {
             const sections_start = sections.items.len;
 
             // Distribute classes over Sections based on Class.group
-            for (course.classes) |class_ix| {
+            var it = course.classes.iterator();
+            while (it.next()) |class_ix| {
                 const class = class_ix.cptr(self.model.classes);
 
                 var could_add: bool = false;
                 for (sections.items[sections_start..]) |*section| {
-                    const first_class = section.classes[0].cptr(self.model.classes);
+                    const first_class = section.classes.first(self.model.classes);
                     if (first_class.group.eql(class.group)) {
-                        section.class_mask |= @as(u64, 1) << @intCast(class_ix.ix);
+                        section.classes.add(class_ix.ix);
                         section.students += class.count;
-                        section.classes.len += 1;
-                        section.classes[section.classes.len - 1] = class_ix;
                         could_add = true;
                     }
                 }
                 if (!could_add) {
-                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .students = class.count, .classes = try self.a.alloc(mdl.Class.Ix, course.classes.len), .class_mask = @as(u64, 1) << @intCast(class_ix.ix) };
-                    section.classes.len = 1;
-                    section.classes[section.classes.len - 1] = class_ix;
+                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .students = class.count };
+                    section.classes.add(class_ix.ix);
                     try sections.append(section);
                 }
             }
@@ -342,16 +305,6 @@ pub const App = struct {
 
         self.model.sections = try self.a.alloc(mdl.Section, sections.items.len);
         std.mem.copyForwards(mdl.Section, self.model.sections, sections.items);
-        for (self.model.sections) |*section| {
-            const orig_classes = section.classes;
-            section.classes = try self.a.alloc(mdl.Class.Ix, orig_classes.len);
-            std.mem.copyForwards(mdl.Class.Ix, section.classes, orig_classes);
-        }
-
-        for (sections.items) |*section| {
-            section.classes.len = section.course.cptr(self.model.courses).classes.len;
-            self.a.free(section.classes);
-        }
 
         // Create Lessons
         var lesson_count: usize = 0;

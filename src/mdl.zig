@@ -26,18 +26,9 @@ pub const Model = struct {
             self.a.free(class.courses);
         self.a.free(self.classes);
 
-        for (self.groups) |group|
-            self.a.free(group.classes);
         self.a.free(self.groups);
-
-        for (self.courses) |course|
-            self.a.free(course.classes);
         self.a.free(self.courses);
-
-        for (self.sections) |section|
-            self.a.free(section.classes);
         self.a.free(self.sections);
-
         self.a.free(self.lessons);
     }
     pub fn alloc(self: *Self, count: Count) !void {
@@ -54,7 +45,8 @@ pub const Model = struct {
             const group_ix = Group.Ix.init(_group_ix);
 
             var count: usize = 0;
-            for (group.classes) |class_ix|
+            var it = group.classes.iterator();
+            while (it.next()) |class_ix|
                 count += class_ix.cptr(self.classes).count;
             std.debug.print("Group '{s}' ({}):", .{ group.name, count });
             for (self.classes) |class| {
@@ -65,13 +57,15 @@ pub const Model = struct {
         }
         for (self.courses) |course| {
             std.debug.print("Course '{s}' ({}h): ", .{ course.name, course.hours });
-            for (course.classes) |class_ix|
+            var it = course.classes.iterator();
+            while (it.next()) |class_ix|
                 std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
             std.debug.print("\n", .{});
         }
         for (self.sections) |section| {
             std.debug.print("Section for Course '{s}' ({}): ", .{ section.course.cptr(self.courses).name, section.students });
-            for (section.classes) |class_ix|
+            var it = section.classes.iterator();
+            while (it.next()) |class_ix|
                 std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
             std.debug.print("\n", .{});
         }
@@ -114,7 +108,8 @@ pub const Schedule = struct {
     pub fn isFree(self: Schedule, hour: usize, section: *const Section) bool {
         const class__lesson = self.hour__class__lesson[hour];
 
-        for (section.classes) |class_ix| {
+        var it = section.classes.iterator();
+        while (it.next()) |class_ix| {
             if (class__lesson[class_ix.ix]) |blocking_lesson| {
                 _ = blocking_lesson;
                 // std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
@@ -127,7 +122,8 @@ pub const Schedule = struct {
 
     pub fn insertLesson(self: *Schedule, hour: usize, section: *const Section, lesson_ix: ?Lesson.Ix) void {
         const class__lesson = self.hour__class__lesson[hour];
-        for (section.classes) |class_ix|
+        var it = section.classes.iterator();
+        while (it.next()) |class_ix|
             class__lesson[class_ix.ix] = lesson_ix;
     }
 
@@ -170,7 +166,8 @@ pub const Schedule = struct {
             defer line.deinit();
             line.print("", .{});
             for (model.groups) |group| {
-                for (group.classes) |class_ix| {
+                var it = group.classes.iterator();
+                while (it.next()) |class_ix| {
                     const class = class_ix.cptr(model.classes);
                     line.print("{s} {}", .{ class.name, class.group.ix });
                 }
@@ -183,7 +180,8 @@ pub const Schedule = struct {
             // _ = hour_ix;
             line.print("{}", .{hour_ix});
             for (model.groups) |group| {
-                for (group.classes) |class_ix| {
+                var it = group.classes.iterator();
+                while (it.next()) |class_ix| {
                     const lesson_ix = class__lesson[class_ix.ix];
                     if (lesson_ix) |ix| {
                         const lesson = ix.cptr(model.lessons);
@@ -209,13 +207,42 @@ pub const Class = struct {
     courses: []Course.Ix = &.{},
 };
 
+pub const ClassSet = struct {
+    const Self = @This();
+
+    mask: u64 = 0,
+
+    pub fn add(self: *Self, ix: usize) void {
+        self.mask |= @as(u64, 1) << @intCast(ix);
+    }
+
+    pub fn first(self: Self, classes: []const Class) *const Class {
+        const ix = @ctz(self.mask);
+        return &classes[ix];
+    }
+
+    pub const Iterator = struct {
+        const My = @This();
+        mask: u64 = 0,
+        pub fn next(my: *My) ?Class.Ix {
+            if (my.mask == 0)
+                return null;
+            const ix = @ctz(my.mask);
+            my.mask -= @as(u64, 1) << @intCast(ix);
+            return Class.Ix.init(ix);
+        }
+    };
+    pub fn iterator(self: Self) Iterator {
+        return Iterator{ .mask = self.mask };
+    }
+};
+
 pub const Group = struct {
     const Self = @This();
     pub const Ix = rubr.index.Ix(Group);
 
     name: []const u8 = &.{},
-    classes: []Class.Ix = &.{},
-    class_mask: u64 = 0,
+    classes: ClassSet = .{},
 };
 
 pub const Course = struct {
@@ -224,8 +251,7 @@ pub const Course = struct {
 
     name: []const u8 = &.{},
     hours: usize = 0,
-    classes: []Class.Ix = &.{},
-    class_mask: u64 = 0,
+    classes: ClassSet = .{},
 };
 
 pub const Section = struct {
@@ -234,8 +260,7 @@ pub const Section = struct {
 
     course: Course.Ix,
     students: usize = 0,
-    classes: []Class.Ix = &.{},
-    class_mask: u64 = 0,
+    classes: ClassSet = .{},
 };
 
 pub const Lesson = struct {
@@ -249,7 +274,7 @@ pub const Lesson = struct {
 pub const Hour = struct {
     const Self = @This();
 
-    class_mask: u64 = 0,
+    classes: ClassSet = .{},
 };
 
 pub const Constraint = struct {
