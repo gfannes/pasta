@@ -33,9 +33,8 @@ pub const Table = struct {
     }
 
     fn readContent(self: *Self, fp: []const u8) !void {
-        var file = try std.fs.openFileAbsolute(fp, .{ .mode = .read_only });
+        var file = try std.fs.cwd().openFile(fp, .{ .mode = .read_only });
         defer file.close();
-
         self.content = try file.readToEndAlloc(self.a, std.math.maxInt(usize));
     }
     fn deriveNewline(self: *Self) void {

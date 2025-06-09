@@ -10,17 +10,18 @@ pub fn main() !void {
 
     var config = cfg.Config.init(a);
     defer config.deinit();
-    config.lesson_fp = "/home/geertf/pier/test7.csv";
+    try config.parse();
 
     var app = App.init(a);
     defer app.deinit();
     try app.setup(config);
 
-    app.model.write();
-
-    var maybe_schedule = try app.fit();
-    if (maybe_schedule) |*schedule| {
-        defer schedule.deinit();
-        try schedule.write(app.model);
+    for (0..config.n) |iteration| {
+        std.debug.print("Iteration {}\n", .{iteration});
+        var maybe_schedule = app.fit() catch null;
+        if (maybe_schedule) |*schedule| {
+            defer schedule.deinit();
+            try schedule.write(app.model);
+        }
     }
 }

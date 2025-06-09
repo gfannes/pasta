@@ -16,9 +16,13 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Info on Classes, Groups, Courses and Constraints from a single `.csv` file
 - [x] Maximum Section capacity
 - [ ] An optional Schedule that must be used as starting point
+- [x] Max nr of steps
+- [x] Iteration count
 ## Output
 - [x] Terminal print-out
-- [ ] A list of Schedules in `.csv` format, with a score
+- [*] A list of Schedules in `.csv` format, with a score
+- [/] Create folder with all output
+	- [*] Fail if folder already exists
 ## Processing
 - [x] Determing sizes for data structures
 - [x] Create data structures
@@ -28,10 +32,11 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Fit Lessons that belong to a Section that is not given to the whole Group
 - [x] Only try to fit a single Lesson belonging to a Section
 - [x] Do not try to fit a Lesson in more that one empty Hour
+- [*] Compute 'hours_per_week' from data
 - [/] Process recursively
 	- [x] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
-	- [ ] Try all available slots
+	- [x] Try all available slots for a Lesson
 - Sort solutions by score
 - Write-out solutions with score
 - [x] Do not add classes with 0 students

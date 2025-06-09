@@ -1,4 +1,4 @@
-type,,,class,class,class,class,class,class,class,class,class,class,class,class
+type,,,,class,class,class,class,class,class,class,class,class,class,class
 ,naam,,6HUW,6EMT,6EWI,6WWI6,6WWI8,6MWE,6MT,6LMT,6GL,6LWE,6LWI6,6LWI8
 ,,aantal,26,4,12,14,15,4,9,2,0,2,1,4
 group,klasgroep1,,1,,,,,,,,,,,
@@ -52,7 +52,7 @@ course,Spaans,3,,,,,,,1,,,,,
 ,,,,,,,,,,,,,,
 course,econ,4,,1,1,,,,,,,,,
 course,Latijn,3,,,,,,,,1,,1,1,1
-course,Grieks,4,,,,,,,,,,,,
+,Grieks,4,,,,,,,,,,,,
 course,SGW,4,1,,,,,,,,,,,
 course,filosofie,2,1,,,,,,,,,,,
 course,KB,2,1,,,,,,,,,,,
@@ -74,8 +74,8 @@ course,esth,1,,,,1,,,1,1,,,1,
 ,PZW3,3,1,1,1,1,1,1,1,1,,1,1,1
 course,PZWXtraa,1,,1,1,,,,,,,,,
 course,PZWXtrab,1,,,,,,,,,,1,,
-course,PZWXtrac,1,,,,,,,,,,,1,1
+course,PZWXtrac,1,,,,,,,,,,,1,
 ,VISIEa,1,1,,,,,,,,,,,
 ,VISIEb,1,,1,1,,,,1,,,,,
 ,VISIEc,1,,,,1,,1,,,,,,
-course,VISIEd,1,,,,,1,,,1,,1,1,
+,VISIEd,1,,,,,1,,,1,,1,1,1

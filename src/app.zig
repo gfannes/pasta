@@ -4,6 +4,7 @@ const csv = @import("csv.zig");
 const mdl = @import("mdl.zig");
 
 pub const Error = error{
+    ExpectedInputFilepath,
     FormatError,
     GroupMismatch,
     TooManyClasses,
@@ -15,7 +16,7 @@ pub const Error = error{
 pub const App = struct {
     const Self = @This();
     const FitData = struct {
-        n: usize = 0,
+        step: usize = 0,
         maybe_schedule: ?mdl.Schedule = null,
         maybe_unfit: ?usize = null,
 
@@ -46,17 +47,20 @@ pub const App = struct {
     classroom_capacity: usize = 0,
     lesson_table: csv.Table,
     count: mdl.Count = .{},
+    max_steps: ?usize = null,
     model: mdl.Model,
+    prng: std.Random.DefaultPrng,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{
             .a = a,
             // &todo: set to 32
-            .hours_per_week = 20,
+            .hours_per_week = 32,
             // &todo: set to 26
             .classroom_capacity = 26,
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
+            .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
         };
     }
     pub fn deinit(self: *Self) void {
@@ -65,19 +69,19 @@ pub const App = struct {
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
-        try self.loadLessonTable(config.lesson_fp);
+        self.max_steps = config.max_steps;
+        if (config.output_dir) |output_dir| {
+            try std.fs.cwd().makePath(output_dir);
+        }
+        try self.loadLessonTable(config.input_fp orelse return Error.ExpectedInputFilepath);
         self.count = deriveCounts(self.lesson_table);
         try self.model.alloc(self.count);
         try self.loadData();
         try self.splitCourses();
         try self.createLessons();
-
-        var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-        const rng = prng.random();
-        rng.shuffle(mdl.Lesson, self.model.lessons);
     }
 
-    pub fn fit(self: Self) !?mdl.Schedule {
+    pub fn fit(self: *Self) !?mdl.Schedule {
         var schedule = mdl.Schedule.init(self.a);
         errdefer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
@@ -93,6 +97,9 @@ pub const App = struct {
             std.debug.print(" {}", .{lesson.ix});
         std.debug.print("\n", .{});
 
+        const rng = self.prng.random();
+        rng.shuffle(mdl.Lesson.Ix, lessons_to_fit);
+
         var fitData = FitData{};
         defer fitData.deinit();
         if (try self.fit_(lessons_to_fit, &schedule, &fitData))
@@ -104,6 +111,16 @@ pub const App = struct {
 
     fn fit_(self: Self, lessons: []mdl.Lesson.Ix, schedule: *mdl.Schedule, fitData: *FitData) !bool {
         if (try fitData.store(lessons.len, schedule.*)) {
+            for (lessons) |lesson_ix| {
+                const lesson = lesson_ix.cptr(self.model.lessons);
+                const section = lesson.section.cptr(self.model.sections);
+                const course = section.course.cptr(self.model.courses);
+                std.debug.print("\t{s}-{}-{}", .{ course.name, section.n, lesson.hour });
+                var it = course.classes.iterator();
+                while (it.next()) |class_ix|
+                    std.debug.print(" {s}", .{class_ix.cptr(self.model.classes).name});
+                std.debug.print("\n", .{});
+            }
             try schedule.write(self.model);
         }
 
@@ -112,9 +129,11 @@ pub const App = struct {
 
         const doLog: bool = false;
 
-        // if (fitData.n.* > 20)
-        //     return Error.Stop;
-        defer fitData.n += 1;
+        if (self.max_steps) |max_steps| {
+            if (fitData.step >= max_steps)
+                return Error.Stop;
+        }
+        fitData.step += 1;
 
         if (self.model.findGap(schedule)) |gap| {
             // There is a gap to fill for some Group: fill this first
@@ -399,6 +418,13 @@ pub const App = struct {
         defer sections.deinit();
 
         for (self.model.courses, 0..) |*course, course_ix| {
+            if (course.classes.mask == 0)
+                // Nobody follows this Course
+                continue;
+            if (course.hours == 0)
+                // Empty Course
+                continue;
+
             if (false) {
                 // Create Section per Group
                 const sections_start = sections.items.len;
@@ -472,7 +498,9 @@ pub const App = struct {
             const course = section.course.cptr(self.model.courses);
             lesson_count += course.hours;
         }
+
         self.model.lessons = try self.a.alloc(mdl.Lesson, lesson_count);
+
         var lesson_ix: usize = 0;
         for (self.model.sections, 0..) |section, section_ix| {
             const course = section.course.cptr(self.model.courses);
