@@ -10,7 +10,7 @@ pub fn main() !void {
 
     var config = cfg.Config.init(a);
     defer config.deinit();
-    config.lesson_fp = "/home/geertf/pier/test6.csv";
+    config.lesson_fp = "/home/geertf/pier/test7.csv";
 
     var app = App.init(a);
     defer app.deinit();

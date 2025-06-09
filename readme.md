@@ -24,11 +24,12 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Create data structures
 - [x] Load data from input
 - [x] Split Courses into Sections
-	- For now, a Course is treated as a Section
-	- [ ] Combine Classes over different Groups when not full yet
-- [/] Fit Lessons that belong to a Section that is not given to the whole Group
+	- [x] Combine Classes over different Groups when not full yet
+- [x] Fit Lessons that belong to a Section that is not given to the whole Group
+- [x] Only try to fit a single Lesson belonging to a Section
+- [x] Do not try to fit a Lesson in more that one empty Hour
 - [/] Process recursively
-	- [ ] Fit Lessons for Classes in a Group where other Classes are already scheduled
+	- [x] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [ ] Try all available slots
 - Sort solutions by score

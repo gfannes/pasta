@@ -7,10 +7,39 @@ pub const Error = error{
     FormatError,
     GroupMismatch,
     TooManyClasses,
+    TooManySections,
+    TooManyStudents,
+    Stop,
 };
 
 pub const App = struct {
     const Self = @This();
+    const FitData = struct {
+        n: usize = 0,
+        maybe_schedule: ?mdl.Schedule = null,
+        maybe_unfit: ?usize = null,
+
+        fn deinit(self: *FitData) void {
+            if (self.maybe_schedule) |*schedule|
+                schedule.deinit();
+        }
+
+        fn store(self: *FitData, unfit: usize, schedule: mdl.Schedule) !bool {
+            if (self.maybe_unfit) |uf| {
+                if (unfit < uf) {
+                    std.debug.print("Found better fit, still {} Lessons not fitted\n", .{unfit});
+                    self.maybe_unfit = unfit;
+                    try (self.maybe_schedule orelse unreachable).assign(schedule);
+                    return true;
+                }
+            } else {
+                self.maybe_unfit = unfit;
+                self.maybe_schedule = try schedule.copy();
+                return true;
+            }
+            return false;
+        }
+    };
 
     a: std.mem.Allocator,
     hours_per_week: usize = 0,
@@ -23,7 +52,7 @@ pub const App = struct {
         return Self{
             .a = a,
             // &todo: set to 32
-            .hours_per_week = 40,
+            .hours_per_week = 20,
             // &todo: set to 26
             .classroom_capacity = 26,
             .lesson_table = csv.Table.init(a),
@@ -41,10 +70,16 @@ pub const App = struct {
         try self.model.alloc(self.count);
         try self.loadData();
         try self.splitCourses();
+        try self.createLessons();
+
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+        const rng = prng.random();
+        rng.shuffle(mdl.Lesson, self.model.lessons);
     }
 
     pub fn fit(self: Self) !?mdl.Schedule {
         var schedule = mdl.Schedule.init(self.a);
+        errdefer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
 
         const all_lessons: []mdl.Lesson.Ix = try self.a.alloc(mdl.Lesson.Ix, self.model.lessons.len);
@@ -58,31 +93,131 @@ pub const App = struct {
             std.debug.print(" {}", .{lesson.ix});
         std.debug.print("\n", .{});
 
-        if (self.fit_(lessons_to_fit, &schedule))
+        var fitData = FitData{};
+        defer fitData.deinit();
+        if (try self.fit_(lessons_to_fit, &schedule, &fitData))
             return schedule;
 
         schedule.deinit();
         return null;
     }
 
-    fn fit_(self: Self, lessons: []mdl.Lesson.Ix, schedule: *mdl.Schedule) bool {
+    fn fit_(self: Self, lessons: []mdl.Lesson.Ix, schedule: *mdl.Schedule, fitData: *FitData) !bool {
+        if (try fitData.store(lessons.len, schedule.*)) {
+            try schedule.write(self.model);
+        }
+
         if (lessons.len == 0)
             return true;
 
-        const lesson_ix = lessons[0];
-        const lesson = lesson_ix.cptr(self.model.lessons);
-        const section = lesson.section.cptr(self.model.sections);
-        for (0..self.hours_per_week) |hour| {
-            if (schedule.isFree(hour, section)) {
-                // std.debug.print("\tCould fit Course {} in Hour {}\n", .{ lesson.course_ix, hour });
+        const doLog: bool = false;
+
+        // if (fitData.n.* > 20)
+        //     return Error.Stop;
+        defer fitData.n += 1;
+
+        if (self.model.findGap(schedule)) |gap| {
+            // There is a gap to fill for some Group: fill this first
+            // 1. Find Lesson that _fills the complete Gap_
+            // 2. Find Lesson that _fills something from the Gap_
+
+            if (doLog) {
+                std.debug.print("{} Filling Gap for hour {} for", .{ lessons.len, gap.hour });
+                var it = gap.classes.iterator();
+                while (it.next()) |class_ix|
+                    std.debug.print(" {s}", .{class_ix.cptr(self.model.classes).name});
+                std.debug.print("\n", .{});
+            }
+
+            const FillStrategy = enum {
+                Complete,
+                Partial,
+            };
+            for (&[_]FillStrategy{ FillStrategy.Complete, FillStrategy.Partial }) |fill_strategy| {
+                if (doLog)
+                    std.debug.print("\t{any}\n", .{fill_strategy});
+                // Sections that are already tested and could not be fit
+                var already_tested_mask: u128 = 0;
+
+                for (lessons) |*lesson_ix| {
+                    const lesson = lesson_ix.cptr(self.model.lessons);
+                    const section_mask = @as(u128, 1) << @intCast(lesson.section.ix);
+
+                    const section = lesson.section.cptr(self.model.sections);
+                    const course = section.course.cptr(self.model.courses);
+
+                    if (section_mask & already_tested_mask != 0) {
+                        if (doLog)
+                            std.debug.print("\tNo need to test {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
+                        continue;
+                    }
+
+                    const section_fits_in_schedule = section.classes.mask & schedule.hour__classes[gap.hour].mask == 0;
+                    if (!section_fits_in_schedule)
+                        // This Lesson does not fit for the given Hour
+                        continue;
+
+                    const section_fills_gap = switch (fill_strategy) {
+                        FillStrategy.Complete => section.classes.mask & gap.classes.mask == gap.classes.mask,
+                        FillStrategy.Partial => section.classes.mask & gap.classes.mask != 0,
+                    };
+                    if (section_fills_gap) {
+                        schedule.insertLesson(gap.hour, section, lesson_ix.*);
+                        if (doLog) {
+                            std.debug.print("\tFitted Lesson {s}-{}-{} for {}\n", .{ course.name, section.n, lesson.hour, gap.hour });
+                            try schedule.write(self.model);
+                        }
+                        std.mem.swap(mdl.Lesson.Ix, lesson_ix, &lessons[0]);
+
+                        if (try self.fit_(lessons[1..], schedule, fitData))
+                            return true;
+
+                        already_tested_mask |= section_mask;
+
+                        // Recursive fit_() failed: erase lesson and continue the search
+                        std.mem.swap(mdl.Lesson.Ix, lesson_ix, &lessons[0]);
+                        if (doLog)
+                            std.debug.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
+                        schedule.insertLesson(gap.hour, section, null);
+                    }
+                }
+            }
+            if (doLog) {
+                std.debug.print("\tCould not fill Gap\n", .{});
+                try schedule.write(self.model);
+            }
+        } else {
+            // There is no Gap: fit the first Lesson, only fit it on an empty Hour once
+            const lesson_ix = lessons[0];
+            const lesson = lesson_ix.cptr(self.model.lessons);
+            const section = lesson.section.cptr(self.model.sections);
+            const course = section.course.cptr(self.model.courses);
+
+            var tested_empty_hour: bool = false;
+            for (0..self.hours_per_week) |hour| {
+                if (schedule.isEmpty(hour)) {
+                    if (tested_empty_hour)
+                        continue;
+                    tested_empty_hour = true;
+                } else if (!schedule.isFree(hour, section)) {
+                    continue;
+                }
 
                 schedule.insertLesson(hour, section, lesson_ix);
+                if (doLog) {
+                    std.debug.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, section.n, lesson.hour, hour });
+                    try schedule.write(self.model);
+                }
 
-                if (self.fit_(lessons[1..], schedule))
+                if (try self.fit_(lessons[1..], schedule, fitData))
                     return true;
 
-                // Recursive fit_() failed: erase lesson and continue the search
+                if (doLog)
+                    std.debug.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
                 schedule.insertLesson(hour, section, null);
+
+                // We try to fit a Lesson only in one place, for now
+                // break;
             }
         }
 
@@ -94,37 +229,24 @@ pub const App = struct {
     fn deriveLessonsToFit(self: Self, all_lessons: []mdl.Lesson.Ix) []mdl.Lesson.Ix {
         var ret = all_lessons;
         ret.len = 0;
-        for (self.model.sections, 0..) |_, _section_ix| {
-            const section_ix = mdl.Section.Ix.init(_section_ix);
 
-            var maybe_group_ix: ?mdl.Group.Ix = null;
-            for (self.model.classes) |class| {
-                var class_has_course: bool = false;
-                for (class.courses) |course| {
-                    if (course.eql(section_ix.cptr(self.model.sections).course)) {
-                        class_has_course = true;
-                        break;
-                    }
-                }
-
-                if (class_has_course) {
-                    if (maybe_group_ix) |group_ix| {
-                        if (!group_ix.eql(class.group)) {
-                            // This Section is given to different class groups: all its Lessons must be fit
-                            for (all_lessons[ret.len..], ret.len..) |lesson_ix, ix| {
-                                const lesson = lesson_ix.cptr(self.model.lessons);
-                                if (lesson.section.eql(section_ix)) {
-                                    ret.len += 1;
-                                    std.mem.swap(mdl.Lesson.Ix, &ret[ret.len - 1], &all_lessons[ix]);
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    maybe_group_ix = class.group;
+        for (all_lessons) |*lesson_ix| {
+            var lesson_is_for_one_group: bool = false;
+            const lesson = lesson_ix.cptr(self.model.lessons);
+            const section = lesson.section.cptr(self.model.sections);
+            for (self.model.groups) |group| {
+                if (group.classes.mask == section.classes.mask) {
+                    lesson_is_for_one_group = true;
+                    break;
                 }
             }
+
+            if (!lesson_is_for_one_group) {
+                ret.len += 1;
+                std.mem.swap(mdl.Lesson.Ix, &ret[ret.len - 1], lesson_ix);
+            }
         }
+
         return ret;
     }
 
@@ -277,36 +399,74 @@ pub const App = struct {
         defer sections.deinit();
 
         for (self.model.courses, 0..) |*course, course_ix| {
-            const sections_start = sections.items.len;
+            if (false) {
+                // Create Section per Group
+                const sections_start = sections.items.len;
+                var n: usize = 0;
+                for (self.model.groups) |group| {
+                    const intersection = course.classes.mask & group.classes.mask;
+                    if (intersection != 0) {
+                        defer n += 1;
 
-            // Distribute classes over Sections based on Class.group
-            var it = course.classes.iterator();
-            while (it.next()) |class_ix| {
-                const class = class_ix.cptr(self.model.classes);
-
-                var could_add: bool = false;
-                for (sections.items[sections_start..]) |*section| {
-                    const first_class = section.classes.first(self.model.classes);
-                    if (first_class.group.eql(class.group)) {
-                        section.classes.add(class_ix.ix);
-                        section.students += class.count;
-                        could_add = true;
+                        var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = n, .classes = mdl.ClassSet{ .mask = intersection } };
+                        var it = section.classes.iterator();
+                        while (it.next()) |class_ix| {
+                            const class = class_ix.cptr(self.model.classes);
+                            section.students += class.count;
+                        }
+                        try sections.append(section);
                     }
                 }
-                if (!could_add) {
-                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .students = class.count };
-                    section.classes.add(class_ix.ix);
-                    try sections.append(section);
-                }
-            }
 
-            // &todo Merge small Sections into larger ones
+                while (true) {
+                    const my_sections = sections.items[sections_start..];
+                    if (my_sections.len < 2)
+                        break;
+
+                    const Fn = struct {
+                        pub fn call(_: void, a: mdl.Section, b: mdl.Section) bool {
+                            return a.students > b.students;
+                        }
+                    };
+                    std.sort.block(mdl.Section, my_sections, {}, Fn.call);
+                    const small = &my_sections[my_sections.len - 1];
+                    const large = &my_sections[my_sections.len - 2];
+                    if (small.students + large.students > self.classroom_capacity)
+                        break;
+
+                    large.students += small.students;
+                    large.classes.mask |= small.classes.mask;
+
+                    try sections.resize(sections.items.len - 1);
+                }
+            } else {
+                // Create only a single Section per Course
+                var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = 0, .classes = course.classes };
+                var it = section.classes.iterator();
+                while (it.next()) |class_ix| {
+                    const class = class_ix.cptr(self.model.classes);
+                    section.students += class.count;
+                }
+                try sections.append(section);
+            }
+        }
+
+        if (sections.items.len > 128)
+            return Error.TooManySections;
+
+        for (sections.items) |section| {
+            if (section.students > self.classroom_capacity) {
+                const course = section.course.cptr(self.model.courses);
+                std.debug.print("Too many students for {s}-{}: {} (max is {})\n", .{ course.name, section.n, section.students, self.classroom_capacity });
+                return Error.TooManyStudents;
+            }
         }
 
         self.model.sections = try self.a.alloc(mdl.Section, sections.items.len);
         std.mem.copyForwards(mdl.Section, self.model.sections, sections.items);
+    }
 
-        // Create Lessons
+    pub fn createLessons(self: *Self) !void {
         var lesson_count: usize = 0;
         for (self.model.sections) |section| {
             const course = section.course.cptr(self.model.courses);

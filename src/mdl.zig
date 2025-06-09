@@ -1,6 +1,10 @@
 const std = @import("std");
 const rubr = @import("rubr.zig");
 
+pub const Error = error{
+    WrongStructure,
+};
+
 pub const Count = struct {
     classes: usize = 0,
     groups: usize = 0,
@@ -40,6 +44,19 @@ pub const Model = struct {
         @memset(self.courses, .{});
     }
 
+    pub fn findGap(self: Self, schedule: *const Schedule) ?Gap {
+        for (self.groups) |group| {
+            for (schedule.hour__classes, 0..) |mask, hour| {
+                const intersection = group.classes.mask & mask.mask;
+                if (intersection != 0 and intersection != group.classes.mask) {
+                    // This is a gap
+                    return Gap{ .hour = hour, .classes = ClassSet{ .mask = group.classes.mask - intersection } };
+                }
+            }
+        }
+        return null;
+    }
+
     pub fn write(self: Self) void {
         for (self.groups, 0..) |group, _group_ix| {
             const group_ix = Group.Ix.init(_group_ix);
@@ -77,6 +94,7 @@ pub const Schedule = struct {
 
     a: std.mem.Allocator,
     hour__class__lesson: [][]?Lesson.Ix = &.{},
+    hour__classes: []ClassSet = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
@@ -85,8 +103,9 @@ pub const Schedule = struct {
         for (self.hour__class__lesson) |e|
             self.a.free(e);
         self.a.free(self.hour__class__lesson);
+        self.a.free(self.hour__classes);
     }
-    pub fn copy(self: *Self) !Self {
+    pub fn copy(self: Self) !Self {
         var ret = Self.init(self.a);
         errdefer ret.deinit();
         ret.hour__class__lesson = try ret.a.alloc([]?Lesson.Ix, self.hour__class__lesson.len);
@@ -95,6 +114,8 @@ pub const Schedule = struct {
             dst.* = try ret.a.alloc(?Lesson.Ix, src.len);
             std.mem.copyForwards(?Lesson.Ix, dst.*, src);
         }
+        ret.hour__classes = try ret.a.alloc(ClassSet, self.hour__classes.len);
+        std.mem.copyForwards(ClassSet, ret.hour__classes, self.hour__classes);
         return ret;
     }
     pub fn alloc(self: *Self, hours: usize, classes: usize) !void {
@@ -103,6 +124,21 @@ pub const Schedule = struct {
             class__lesson.* = try self.a.alloc(?Lesson.Ix, classes);
             @memset(class__lesson.*, null);
         }
+        self.hour__classes = try self.a.alloc(ClassSet, hours);
+        @memset(self.hour__classes, ClassSet{});
+    }
+    pub fn assign(self: *Self, other: Self) !void {
+        if (other.hour__class__lesson.len != self.hour__class__lesson.len)
+            return Error.WrongStructure;
+        for (self.hour__class__lesson, 0..) |dst, ix| {
+            const src = other.hour__class__lesson[ix];
+            std.mem.copyForwards(?Lesson.Ix, dst, src);
+        }
+        std.mem.copyForwards(ClassSet, self.hour__classes, other.hour__classes);
+    }
+
+    pub fn isEmpty(self: Schedule, hour: usize) bool {
+        return self.hour__classes[hour].mask == 0;
     }
 
     pub fn isFree(self: Schedule, hour: usize, section: *const Section) bool {
@@ -125,6 +161,12 @@ pub const Schedule = struct {
         var it = section.classes.iterator();
         while (it.next()) |class_ix|
             class__lesson[class_ix.ix] = lesson_ix;
+
+        if (lesson_ix == null) {
+            self.hour__classes[hour].mask &= ~section.classes.mask;
+        } else {
+            self.hour__classes[hour].mask |= section.classes.mask;
+        }
     }
 
     pub fn write(self: Self, model: Model) !void {
@@ -259,6 +301,7 @@ pub const Section = struct {
     pub const Ix = rubr.index.Ix(Section);
 
     course: Course.Ix,
+    n: usize = 0,
     students: usize = 0,
     classes: ClassSet = .{},
 };
@@ -279,4 +322,11 @@ pub const Hour = struct {
 
 pub const Constraint = struct {
     const Self = @This();
+};
+
+pub const Gap = struct {
+    const Self = @This();
+
+    hour: usize = 0,
+    classes: ClassSet = .{},
 };
