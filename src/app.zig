@@ -39,7 +39,6 @@ pub const App = struct {
             var is_better: bool = false;
             if (self.maybe_solution) |*solution| {
                 if (unfit < solution.unfit) {
-                    std.debug.print("Found better fit, still {} Lessons not fitted\n", .{unfit});
                     solution.unfit = unfit;
                     try solution.schedule.assign(schedule);
                     is_better = true;
@@ -139,23 +138,24 @@ pub const App = struct {
 
     fn fit_(self: Self, lessons: []mdl.Lesson.Ix, schedule: *mdl.Schedule, fitData: *FitData) !bool {
         if (try fitData.store(lessons.len, schedule.*)) {
-            for (lessons) |lesson_ix| {
-                const lesson = lesson_ix.cptr(self.model.lessons);
-                const section = lesson.section.cptr(self.model.sections);
-                const course = section.course.cptr(self.model.courses);
-                std.debug.print("\t{s}-{}-{}", .{ course.name, section.n, lesson.hour });
-                var it = course.classes.iterator();
-                while (it.next()) |class_ix|
-                    std.debug.print(" {s}", .{class_ix.cptr(self.model.classes).name});
-                std.debug.print("\n", .{});
+            if (self.log.level(1)) |w| {
+                try w.print("Found better fit, still {} Lessons not fitted\n", .{lessons.len});
+                for (lessons) |lesson_ix| {
+                    const lesson = lesson_ix.cptr(self.model.lessons);
+                    const section = lesson.section.cptr(self.model.sections);
+                    const course = section.course.cptr(self.model.courses);
+                    try w.print("\t{s}-{}-{}", .{ course.name, section.n, lesson.hour });
+                    var it = course.classes.iterator();
+                    while (it.next()) |class_ix|
+                        try w.print(" {s}", .{class_ix.cptr(self.model.classes).name});
+                    try w.print("\n", .{});
+                }
+                try schedule.write(w, self.model);
             }
-            try schedule.write(self.model, self.log);
         }
 
         if (lessons.len == 0)
             return true;
-
-        const doLog: bool = false;
 
         if (self.max_steps) |max_steps| {
             if (fitData.step >= max_steps)
@@ -168,12 +168,12 @@ pub const App = struct {
             // 1. Find Lesson that _fills the complete Gap_
             // 2. Find Lesson that _fills something from the Gap_
 
-            if (doLog) {
-                std.debug.print("{} Filling Gap for hour {} for", .{ lessons.len, gap.hour });
+            if (self.log.level(1)) |w| {
+                try w.print("{} Filling Gap for hour {} for", .{ lessons.len, gap.hour });
                 var it = gap.classes.iterator();
                 while (it.next()) |class_ix|
-                    std.debug.print(" {s}", .{class_ix.cptr(self.model.classes).name});
-                std.debug.print("\n", .{});
+                    try w.print(" {s}", .{class_ix.cptr(self.model.classes).name});
+                try w.print("\n", .{});
             }
 
             const FillStrategy = enum {
@@ -181,8 +181,8 @@ pub const App = struct {
                 Partial,
             };
             for (&[_]FillStrategy{ FillStrategy.Complete, FillStrategy.Partial }) |fill_strategy| {
-                if (doLog)
-                    std.debug.print("\t{any}\n", .{fill_strategy});
+                if (self.log.level(1)) |w|
+                    try w.print("\t{any}\n", .{fill_strategy});
                 // Sections that are already tested and could not be fit
                 var already_tested_mask: u128 = 0;
 
@@ -194,8 +194,8 @@ pub const App = struct {
                     const course = section.course.cptr(self.model.courses);
 
                     if (section_mask & already_tested_mask != 0) {
-                        if (doLog)
-                            std.debug.print("\tNo need to test {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
+                        if (self.log.level(1)) |w|
+                            try w.print("\tNo need to test {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
                         continue;
                     }
 
@@ -210,9 +210,9 @@ pub const App = struct {
                     };
                     if (section_fills_gap) {
                         schedule.insertLesson(gap.hour, section, lesson_ix.*);
-                        if (doLog) {
-                            std.debug.print("\tFitted Lesson {s}-{}-{} for {}\n", .{ course.name, section.n, lesson.hour, gap.hour });
-                            try schedule.write(self.model);
+                        if (self.log.level(1)) |w| {
+                            try w.print("\tFitted Lesson {s}-{}-{} for {}\n", .{ course.name, section.n, lesson.hour, gap.hour });
+                            try schedule.write(w, self.model);
                         }
                         std.mem.swap(mdl.Lesson.Ix, lesson_ix, &lessons[0]);
 
@@ -223,15 +223,15 @@ pub const App = struct {
 
                         // Recursive fit_() failed: erase lesson and continue the search
                         std.mem.swap(mdl.Lesson.Ix, lesson_ix, &lessons[0]);
-                        if (doLog)
-                            std.debug.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
+                        if (self.log.level(1)) |w|
+                            try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
                         schedule.insertLesson(gap.hour, section, null);
                     }
                 }
             }
-            if (doLog) {
-                std.debug.print("\tCould not fill Gap\n", .{});
-                try schedule.write(self.model);
+            if (self.log.level(1)) |w| {
+                try w.print("\tCould not fill Gap\n", .{});
+                try schedule.write(w, self.model);
             }
         } else {
             // There is no Gap: fit the first Lesson, only fit it on an empty Hour once
@@ -251,16 +251,16 @@ pub const App = struct {
                 }
 
                 schedule.insertLesson(hour, section, lesson_ix);
-                if (doLog) {
-                    std.debug.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, section.n, lesson.hour, hour });
-                    try schedule.write(self.model);
+                if (self.log.level(1)) |w| {
+                    try w.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, section.n, lesson.hour, hour });
+                    try schedule.write(w, self.model);
                 }
 
                 if (try self.fit_(lessons[1..], schedule, fitData))
                     return true;
 
-                if (doLog)
-                    std.debug.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
+                if (self.log.level(1)) |w|
+                    try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, section.n, lesson.hour });
                 schedule.insertLesson(hour, section, null);
 
                 // We try to fit a Lesson only in one place, for now
@@ -268,8 +268,6 @@ pub const App = struct {
             }
         }
 
-        // schedule.write(self.model);
-        // std.debug.print("Could not find a fit\n", .{});
         return false;
     }
 
@@ -322,7 +320,6 @@ pub const App = struct {
             }
         }
 
-        std.debug.print("count: {}\n", .{count});
         return count;
     }
 
@@ -511,7 +508,8 @@ pub const App = struct {
         for (sections.items) |section| {
             if (section.students > self.classroom_capacity) {
                 const course = section.course.cptr(self.model.courses);
-                std.debug.print("Too many students for {s}-{}: {} (max is {})\n", .{ course.name, section.n, section.students, self.classroom_capacity });
+                if (self.log.level(1)) |w|
+                    try w.print("Too many students for {s}-{}: {} (max is {})\n", .{ course.name, section.n, section.students, self.classroom_capacity });
                 return Error.TooManyStudents;
             }
         }

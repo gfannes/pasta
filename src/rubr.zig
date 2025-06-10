@@ -101,8 +101,7 @@ pub const log = struct {
     pub const Log = struct {
         const Self = @This();
         const BufferedWriter = std.io.BufferedWriter(4096, std.fs.File.Writer);
-        // const Writer = BufferedWriter.Writer;
-        const Writer = std.fs.File.Writer;
+        pub const Writer = std.fs.File.Writer;
 
         _file: std.fs.File = std.io.getStdOut(),
         _do_close: bool = false,

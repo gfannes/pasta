@@ -65,6 +65,6 @@ pub fn main() !void {
         }
 
         try output_log.print("Unfit {}\n", .{solution.unfit});
-        try solution.schedule.write(myApp.model, &output_log);
+        try solution.schedule.write(output_log.writer(), myApp.model);
     }
 }

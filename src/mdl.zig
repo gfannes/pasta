@@ -57,34 +57,36 @@ pub const Model = struct {
         return null;
     }
 
-    pub fn write(self: Self) void {
-        for (self.groups, 0..) |group, _group_ix| {
-            const group_ix = Group.Ix.init(_group_ix);
+    pub fn write(self: Self) !void {
+        if (self.log.level(1)) |w| {
+            for (self.groups, 0..) |group, _group_ix| {
+                const group_ix = Group.Ix.init(_group_ix);
 
-            var count: usize = 0;
-            var it = group.classes.iterator();
-            while (it.next()) |class_ix|
-                count += class_ix.cptr(self.classes).count;
-            std.debug.print("Group '{s}' ({}):", .{ group.name, count });
-            for (self.classes) |class| {
-                if (class.group.eql(group_ix))
-                    std.debug.print(" {s} ({})", .{ class.name, class.count });
+                var count: usize = 0;
+                var it = group.classes.iterator();
+                while (it.next()) |class_ix|
+                    count += class_ix.cptr(self.classes).count;
+                try w.print("Group '{s}' ({}):", .{ group.name, count });
+                for (self.classes) |class| {
+                    if (class.group.eql(group_ix))
+                        try w.print(" {s} ({})", .{ class.name, class.count });
+                }
+                try w.print("\n", .{});
             }
-            std.debug.print("\n", .{});
-        }
-        for (self.courses) |course| {
-            std.debug.print("Course '{s}' ({}h): ", .{ course.name, course.hours });
-            var it = course.classes.iterator();
-            while (it.next()) |class_ix|
-                std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
-            std.debug.print("\n", .{});
-        }
-        for (self.sections) |section| {
-            std.debug.print("Section for Course '{s}' ({}): ", .{ section.course.cptr(self.courses).name, section.students });
-            var it = section.classes.iterator();
-            while (it.next()) |class_ix|
-                std.debug.print(" {s}", .{class_ix.cptr(self.classes).name});
-            std.debug.print("\n", .{});
+            for (self.courses) |course| {
+                try w.print("Course '{s}' ({}h): ", .{ course.name, course.hours });
+                var it = course.classes.iterator();
+                while (it.next()) |class_ix|
+                    try w.print(" {s}", .{class_ix.cptr(self.classes).name});
+                try w.print("\n", .{});
+            }
+            for (self.sections) |section| {
+                try w.print("Section for Course '{s}' ({}): ", .{ section.course.cptr(self.courses).name, section.students });
+                var it = section.classes.iterator();
+                while (it.next()) |class_ix|
+                    try w.print(" {s}", .{class_ix.cptr(self.classes).name});
+                try w.print("\n", .{});
+            }
         }
     }
 };
@@ -148,7 +150,6 @@ pub const Schedule = struct {
         while (it.next()) |class_ix| {
             if (class__lesson[class_ix.ix]) |blocking_lesson| {
                 _ = blocking_lesson;
-                // std.debug.print("\tHour {} is blocked for Class {} by Lesson {}\n", .{ hour, class_ix, blocking_lesson });
                 return false;
             }
         }
@@ -169,7 +170,7 @@ pub const Schedule = struct {
         }
     }
 
-    pub fn write(self: Self, model: Model, log: *const rubr.log.Log) !void {
+    pub fn write(self: Self, writer: rubr.log.Log.Writer, model: Model) !void {
         var max_width: usize = 0;
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |lesson_ix| {
@@ -186,26 +187,26 @@ pub const Schedule = struct {
             const My = @This();
             a: std.mem.Allocator,
             width: usize,
-            log: *const rubr.log.Log,
+            w: rubr.log.Log.Writer,
             buf: []u8 = &.{},
-            fn init(a: std.mem.Allocator, width: usize, l: *const rubr.log.Log) !My {
-                try l.print("|", .{});
-                return My{ .a = a, .width = width, .log = l, .buf = try a.alloc(u8, width) };
+            fn init(a: std.mem.Allocator, width: usize, w: rubr.log.Log.Writer) !My {
+                try w.print("|", .{});
+                return My{ .a = a, .width = width, .w = w, .buf = try a.alloc(u8, width) };
             }
             fn deinit(my: *My) void {
-                my.log.print("\n", .{}) catch {};
+                my.w.print("\n", .{}) catch {};
                 my.a.free(my.buf);
             }
             fn print(my: *My, comptime fmt: []const u8, options: anytype) void {
                 for (my.buf) |*ch|
                     ch.* = ' ';
                 _ = std.fmt.bufPrint(my.buf, fmt, options) catch {};
-                my.log.print(" {s} |", .{my.buf}) catch {};
+                my.w.print(" {s} |", .{my.buf}) catch {};
             }
         };
 
         {
-            var line = try Line.init(self.a, max_width, log);
+            var line = try Line.init(self.a, max_width, writer);
             defer line.deinit();
             line.print("", .{});
             for (model.groups) |group| {
@@ -218,7 +219,7 @@ pub const Schedule = struct {
         }
 
         for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
-            var line = try Line.init(self.a, max_width, log);
+            var line = try Line.init(self.a, max_width, writer);
             defer line.deinit();
             // _ = hour_ix;
             line.print("{}", .{hour_ix});
