@@ -21,8 +21,8 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 ## Output
 - [x] Terminal print-out
 - [*] A list of Schedules in `.csv` format, with a score
-- [/] Create folder with all output
-	- [*] Fail if folder already exists
+- [x] Create folder with all output
+	- [-] Fail if folder already exists
 ## Processing
 - [x] Determing sizes for data structures
 - [x] Create data structures
@@ -37,8 +37,8 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 	- [x] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [x] Try all available slots for a Lesson
-- Sort solutions by score
-- Write-out solutions with score
+- [x] Write-out solutions with score in folder
+- [x] Sort solutions by score
 - [x] Do not add classes with 0 students
 - [x] Sort classes per group
 - [ ] Take Constraints into account

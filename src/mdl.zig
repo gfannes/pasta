@@ -169,7 +169,7 @@ pub const Schedule = struct {
         }
     }
 
-    pub fn write(self: Self, model: Model) !void {
+    pub fn write(self: Self, model: Model, log: *const rubr.log.Log) !void {
         var max_width: usize = 0;
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |lesson_ix| {
@@ -186,25 +186,26 @@ pub const Schedule = struct {
             const My = @This();
             a: std.mem.Allocator,
             width: usize,
+            log: *const rubr.log.Log,
             buf: []u8 = &.{},
-            fn init(width: usize, a: std.mem.Allocator) !My {
-                std.debug.print("|", .{});
-                return My{ .a = a, .width = width, .buf = try a.alloc(u8, width) };
+            fn init(a: std.mem.Allocator, width: usize, l: *const rubr.log.Log) !My {
+                try l.print("|", .{});
+                return My{ .a = a, .width = width, .log = l, .buf = try a.alloc(u8, width) };
             }
             fn deinit(my: *My) void {
-                std.debug.print("\n", .{});
+                my.log.print("\n", .{}) catch {};
                 my.a.free(my.buf);
             }
             fn print(my: *My, comptime fmt: []const u8, options: anytype) void {
                 for (my.buf) |*ch|
                     ch.* = ' ';
                 _ = std.fmt.bufPrint(my.buf, fmt, options) catch {};
-                std.debug.print(" {s} |", .{my.buf});
+                my.log.print(" {s} |", .{my.buf}) catch {};
             }
         };
 
         {
-            var line = try Line.init(max_width, self.a);
+            var line = try Line.init(self.a, max_width, log);
             defer line.deinit();
             line.print("", .{});
             for (model.groups) |group| {
@@ -217,7 +218,7 @@ pub const Schedule = struct {
         }
 
         for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
-            var line = try Line.init(max_width, self.a);
+            var line = try Line.init(self.a, max_width, log);
             defer line.deinit();
             // _ = hour_ix;
             line.print("{}", .{hour_ix});

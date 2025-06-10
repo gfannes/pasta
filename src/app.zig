@@ -2,6 +2,7 @@ const std = @import("std");
 const cfg = @import("cfg.zig");
 const csv = @import("csv.zig");
 const mdl = @import("mdl.zig");
+const rubr = @import("rubr.zig");
 
 pub const Error = error{
     ExpectedInputFilepath,
@@ -13,36 +14,46 @@ pub const Error = error{
     Stop,
 };
 
+pub const Solution = struct {
+    const Self = @This();
+
+    schedule: mdl.Schedule,
+    unfit: usize,
+    pub fn deinit(self: *Self) void {
+        self.schedule.deinit();
+    }
+};
+
 pub const App = struct {
     const Self = @This();
     const FitData = struct {
         step: usize = 0,
-        maybe_schedule: ?mdl.Schedule = null,
-        maybe_unfit: ?usize = null,
+        maybe_solution: ?Solution = null,
 
         fn deinit(self: *FitData) void {
-            if (self.maybe_schedule) |*schedule|
-                schedule.deinit();
+            if (self.maybe_solution) |*solution|
+                solution.deinit();
         }
 
         fn store(self: *FitData, unfit: usize, schedule: mdl.Schedule) !bool {
-            if (self.maybe_unfit) |uf| {
-                if (unfit < uf) {
+            var is_better: bool = false;
+            if (self.maybe_solution) |*solution| {
+                if (unfit < solution.unfit) {
                     std.debug.print("Found better fit, still {} Lessons not fitted\n", .{unfit});
-                    self.maybe_unfit = unfit;
-                    try (self.maybe_schedule orelse unreachable).assign(schedule);
-                    return true;
+                    solution.unfit = unfit;
+                    try solution.schedule.assign(schedule);
+                    is_better = true;
                 }
             } else {
-                self.maybe_unfit = unfit;
-                self.maybe_schedule = try schedule.copy();
-                return true;
+                self.maybe_solution = Solution{ .schedule = try schedule.copy(), .unfit = unfit };
+                is_better = true;
             }
-            return false;
+            return is_better;
         }
     };
 
     a: std.mem.Allocator,
+    log: *const rubr.log.Log,
     hours_per_week: usize = 0,
     classroom_capacity: usize = 0,
     lesson_table: csv.Table,
@@ -51,9 +62,10 @@ pub const App = struct {
     model: mdl.Model,
     prng: std.Random.DefaultPrng,
 
-    pub fn init(a: std.mem.Allocator) Self {
+    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log) Self {
         return Self{
             .a = a,
+            .log = log,
             // &todo: set to 32
             .hours_per_week = 32,
             // &todo: set to 26
@@ -81,9 +93,9 @@ pub const App = struct {
         try self.createLessons();
     }
 
-    pub fn fit(self: *Self) !?mdl.Schedule {
+    pub fn fit(self: *Self) !?Solution {
         var schedule = mdl.Schedule.init(self.a);
-        errdefer schedule.deinit();
+        defer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
 
         const all_lessons: []mdl.Lesson.Ix = try self.a.alloc(mdl.Lesson.Ix, self.model.lessons.len);
@@ -102,10 +114,26 @@ pub const App = struct {
 
         var fitData = FitData{};
         defer fitData.deinit();
-        if (try self.fit_(lessons_to_fit, &schedule, &fitData))
-            return schedule;
+        if (self.fit_(lessons_to_fit, &schedule, &fitData)) |ok| {
+            if (ok)
+                std.debug.print("Found solution!\n", .{})
+            else
+                std.debug.print("Could not find solution\n", .{});
+        } else |err| {
+            switch (err) {
+                Error.Stop => std.debug.print("Stopping search\n", .{}),
+                else => {
+                    std.debug.print("Something went wrong during search: {}\n", .{err});
+                    return err;
+                },
+            }
+        }
 
-        schedule.deinit();
+        if (fitData.maybe_solution) |solution| {
+            defer fitData.maybe_solution = null;
+            return solution;
+        }
+
         return null;
     }
 
@@ -121,7 +149,7 @@ pub const App = struct {
                     std.debug.print(" {s}", .{class_ix.cptr(self.model.classes).name});
                 std.debug.print("\n", .{});
             }
-            try schedule.write(self.model);
+            try schedule.write(self.model, self.log);
         }
 
         if (lessons.len == 0)
