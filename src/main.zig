@@ -17,6 +17,13 @@ pub fn main() !void {
     log.init();
     defer log.deinit();
 
+    if (config.print_help) {
+        try config.print(log.writer());
+        return;
+    }
+
+    log.setLevel(config.verbose);
+
     var myApp = app.App.init(a, &log);
     defer myApp.deinit();
     try myApp.setup(config);

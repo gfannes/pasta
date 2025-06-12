@@ -231,7 +231,7 @@ pub const Schedule = struct {
                         const lesson = ix.cptr(model.lessons);
                         const section = lesson.section.cptr(model.sections);
                         const course = section.course.cptr(model.courses);
-                        line.print("{s}-{}", .{ course.name, lesson.hour });
+                        line.print("{s}-{}-{}", .{ course.name, section.n, lesson.hour });
                     } else {
                         line.print("", .{});
                     }

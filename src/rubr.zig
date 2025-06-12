@@ -1,3 +1,5 @@
+// Selection from https://github.com/gfannes/rubr
+
 const std = @import("std");
 
 pub const index = struct {

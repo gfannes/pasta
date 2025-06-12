@@ -23,6 +23,7 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [*] A list of Schedules in `.csv` format, with a score
 - [x] Create folder with all output
 	- [-] Fail if folder already exists
+- [x] Add Section id to output
 ## Processing
 - [x] Determing sizes for data structures
 - [x] Create data structures
@@ -32,8 +33,9 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Fit Lessons that belong to a Section that is not given to the whole Group
 - [x] Only try to fit a single Lesson belonging to a Section
 - [x] Do not try to fit a Lesson in more that one empty Hour
-- [*] Compute 'hours_per_week' from data
+- [ ] Compute 'hours_per_week' from data
 - [/] Process recursively
+	- [*] Try different random splits of a Course into Sections
 	- [x] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [x] Try all available slots for a Lesson

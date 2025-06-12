@@ -14,6 +14,10 @@ pub const Error = error{
     Stop,
 };
 
+const Max = struct {
+    const classes: usize = 64;
+};
+
 pub const Solution = struct {
     const Self = @This();
 
@@ -84,11 +88,17 @@ pub const App = struct {
         if (config.output_dir) |output_dir| {
             try std.fs.cwd().makePath(output_dir);
         }
-        try self.loadLessonTable(config.input_fp orelse return Error.ExpectedInputFilepath);
-        self.count = deriveCounts(self.lesson_table);
+
+        const input_fp = config.input_fp orelse {
+            try self.log.err("Please specify an input file\n", .{});
+            return Error.ExpectedInputFilepath;
+        };
+        try self.loadLessonTable(input_fp);
+
+        self.count = try deriveCounts(self.lesson_table, self.log);
         try self.model.alloc(self.count);
         try self.loadData();
-        try self.splitCourses();
+        try self.splitCourses(SplitStrategy.Random);
         try self.createLessons();
     }
 
@@ -103,10 +113,12 @@ pub const App = struct {
         defer self.a.free(all_lessons);
 
         const lessons_to_fit = self.deriveLessonsToFit(all_lessons);
-        std.debug.print("Lessons to fit", .{});
-        for (lessons_to_fit) |lesson|
-            std.debug.print(" {}", .{lesson.ix});
-        std.debug.print("\n", .{});
+        if (self.log.level(1)) |w| {
+            try w.print("Lessons to fit", .{});
+            for (lessons_to_fit) |lesson|
+                try w.print(" {}", .{lesson.ix});
+            try w.print("\n", .{});
+        }
 
         const rng = self.prng.random();
         rng.shuffle(mdl.Lesson.Ix, lessons_to_fit);
@@ -115,14 +127,14 @@ pub const App = struct {
         defer fitData.deinit();
         if (self.fit_(lessons_to_fit, &schedule, &fitData)) |ok| {
             if (ok)
-                std.debug.print("Found solution!\n", .{})
+                try self.log.info("Found solution!\n", .{})
             else
-                std.debug.print("Could not find solution\n", .{});
+                try self.log.info("Could not find solution\n", .{});
         } else |err| {
             switch (err) {
-                Error.Stop => std.debug.print("Stopping search\n", .{}),
+                Error.Stop => try self.log.info("Stopping search\n", .{}),
                 else => {
-                    std.debug.print("Something went wrong during search: {}\n", .{err});
+                    try self.log.err("Something went wrong during search: {}\n", .{err});
                     return err;
                 },
             }
@@ -299,7 +311,7 @@ pub const App = struct {
         try self.lesson_table.loadFromFile(fp);
     }
 
-    fn deriveCounts(lesson_table: csv.Table) mdl.Count {
+    fn deriveCounts(lesson_table: csv.Table, log: *const rubr.log.Log) !mdl.Count {
         var count = mdl.Count{};
 
         for (lesson_table.rows[0][3..], 3..) |cell, ix| {
@@ -315,8 +327,10 @@ pub const App = struct {
                 count.groups += 1;
             if (std.mem.eql(u8, row[0].str, "course")) {
                 count.courses += 1;
-                if (row[2].int == null)
-                    std.debug.print("Error: could not find hour count for course '{s}'\n", .{row[1].str});
+                if (row[2].int == null) {
+                    try log.err("Could not find hour count for course '{s}'\n", .{row[1].str});
+                    return Error.FormatError;
+                }
             }
         }
 
@@ -324,8 +338,10 @@ pub const App = struct {
     }
 
     fn loadData(self: *Self) !void {
-        if (self.count.classes > 64)
+        if (self.count.classes > Max.classes) {
+            try self.log.err("You have {} classes while I can only handle {}\n", .{ self.count.classes, Max.classes });
             return Error.TooManyClasses;
+        }
 
         var class__col = try self.a.alloc(usize, self.count.classes);
         defer self.a.free(class__col);
@@ -371,7 +387,8 @@ pub const App = struct {
             if (self.lesson_table.rows[2][col_ix].int) |count| {
                 class.count = @intCast(count);
             } else {
-                std.debug.print("Error: could not find Class size for '{s}'\n", .{class.name});
+                try self.log.err("Could not find Class size for '{s}'\n", .{class.name});
+                return Error.FormatError;
             }
 
             var course_count: usize = 0;
@@ -379,7 +396,7 @@ pub const App = struct {
                 if (self.lesson_table.rows[row_ix][col_ix].int) |int| {
                     if (int != 1 and int != 0) {
                         const course = &self.model.courses[course_ix];
-                        std.debug.print("Error: please use a '1' to indicate that Class '{s}' follows Course '{s}'\n", .{ class.name, course.name });
+                        try self.log.err("Please use a '1' to indicate that Class '{s}' follows Course '{s}'\n", .{ class.name, course.name });
                         return Error.FormatError;
                     }
                     course_count += @intCast(int);
@@ -399,7 +416,7 @@ pub const App = struct {
                 for (class__col, 0..) |col_ix, class_ix| {
                     if (row[col_ix].int) |int| {
                         if (int != 1) {
-                            std.debug.print("Error: please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
+                            try self.log.err("Please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
                             return Error.FormatError;
                         }
                         group.classes.add(class_ix);
@@ -428,7 +445,7 @@ pub const App = struct {
                             },
                             else => {
                                 const class_name = self.lesson_table.rows[1][col_ix].str;
-                                std.debug.print("Error: please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
+                                try self.log.err("Please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
                                 return Error.FormatError;
                             },
                         }
@@ -438,7 +455,12 @@ pub const App = struct {
         }
     }
 
-    fn splitCourses(self: *Self) !void {
+    pub const SplitStrategy = enum {
+        OneSection,
+        PerGroup_MergeSmall,
+        Random,
+    };
+    fn splitCourses(self: *Self, splitStrategy: SplitStrategy) !void {
         var sections = std.ArrayList(mdl.Section).init(self.a);
         defer sections.deinit();
 
@@ -450,55 +472,99 @@ pub const App = struct {
                 // Empty Course
                 continue;
 
-            if (false) {
-                // Create Section per Group
-                const sections_start = sections.items.len;
-                var n: usize = 0;
-                for (self.model.groups) |group| {
-                    const intersection = course.classes.mask & group.classes.mask;
-                    if (intersection != 0) {
-                        defer n += 1;
-
-                        var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = n, .classes = mdl.ClassSet{ .mask = intersection } };
-                        var it = section.classes.iterator();
-                        while (it.next()) |class_ix| {
-                            const class = class_ix.cptr(self.model.classes);
-                            section.students += class.count;
-                        }
-                        try sections.append(section);
+            switch (splitStrategy) {
+                SplitStrategy.OneSection => {
+                    // Create only a single Section per Course
+                    var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = 0, .classes = course.classes };
+                    var it = section.classes.iterator();
+                    while (it.next()) |class_ix| {
+                        const class = class_ix.cptr(self.model.classes);
+                        section.students += class.count;
                     }
-                }
+                    try sections.append(section);
+                },
+                SplitStrategy.PerGroup_MergeSmall => {
+                    // Create Section per Group
+                    const sections_start = sections.items.len;
+                    var n: usize = 0;
+                    for (self.model.groups) |group| {
+                        const intersection = course.classes.mask & group.classes.mask;
+                        if (intersection != 0) {
+                            defer n += 1;
 
-                while (true) {
-                    const my_sections = sections.items[sections_start..];
-                    if (my_sections.len < 2)
-                        break;
-
-                    const Fn = struct {
-                        pub fn call(_: void, a: mdl.Section, b: mdl.Section) bool {
-                            return a.students > b.students;
+                            var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = n, .classes = mdl.ClassSet{ .mask = intersection } };
+                            var it = section.classes.iterator();
+                            while (it.next()) |class_ix| {
+                                const class = class_ix.cptr(self.model.classes);
+                                section.students += class.count;
+                            }
+                            try sections.append(section);
                         }
-                    };
-                    std.sort.block(mdl.Section, my_sections, {}, Fn.call);
-                    const small = &my_sections[my_sections.len - 1];
-                    const large = &my_sections[my_sections.len - 2];
-                    if (small.students + large.students > self.classroom_capacity)
-                        break;
+                    }
 
-                    large.students += small.students;
-                    large.classes.mask |= small.classes.mask;
+                    while (true) {
+                        const my_sections = sections.items[sections_start..];
+                        if (my_sections.len < 2)
+                            break;
 
-                    try sections.resize(sections.items.len - 1);
-                }
-            } else {
-                // Create only a single Section per Course
-                var section = mdl.Section{ .course = mdl.Course.Ix.init(course_ix), .n = 0, .classes = course.classes };
-                var it = section.classes.iterator();
-                while (it.next()) |class_ix| {
-                    const class = class_ix.cptr(self.model.classes);
-                    section.students += class.count;
-                }
-                try sections.append(section);
+                        const Fn = struct {
+                            pub fn call(_: void, a: mdl.Section, b: mdl.Section) bool {
+                                return a.students > b.students;
+                            }
+                        };
+                        std.sort.block(mdl.Section, my_sections, {}, Fn.call);
+                        const small = &my_sections[my_sections.len - 1];
+                        const large = &my_sections[my_sections.len - 2];
+                        if (small.students + large.students > self.classroom_capacity)
+                            break;
+
+                        large.students += small.students;
+                        large.classes.mask |= small.classes.mask;
+
+                        try sections.resize(sections.items.len - 1);
+                    }
+                },
+                SplitStrategy.Random => {
+                    var buffer: [Max.classes]mdl.Class.Ix = undefined;
+                    var class_ixs: []mdl.Class.Ix = &buffer;
+                    class_ixs.len = 0;
+                    var it = course.classes.iterator();
+                    while (it.next()) |class_ix| {
+                        class_ixs.len += 1;
+                        class_ixs[class_ixs.len - 1] = class_ix;
+                    }
+
+                    const rng = self.prng.random();
+                    rng.shuffle(mdl.Class.Ix, class_ixs);
+
+                    var maybe_section: ?mdl.Section = null;
+                    var n: usize = 0;
+                    for (class_ixs) |class_ix| {
+                        const class = class_ix.cptr(self.model.classes);
+
+                        if (maybe_section) |*section| {
+                            if (section.students + class.count <= self.classroom_capacity) {
+                                section.students += class.count;
+                                section.classes.add(class_ix.ix);
+                            } else {
+                                try sections.append(section.*);
+                                maybe_section = null;
+                            }
+                        }
+
+                        if (maybe_section == null) {
+                            maybe_section = mdl.Section{
+                                .course = mdl.Course.Ix.init(course_ix),
+                                .n = n,
+                                .students = class.count,
+                                .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
+                            };
+                            n += 1;
+                        }
+                    }
+                    if (maybe_section) |section|
+                        try sections.append(section);
+                },
             }
         }
 
@@ -508,8 +574,7 @@ pub const App = struct {
         for (sections.items) |section| {
             if (section.students > self.classroom_capacity) {
                 const course = section.course.cptr(self.model.courses);
-                if (self.log.level(1)) |w|
-                    try w.print("Too many students for {s}-{}: {} (max is {})\n", .{ course.name, section.n, section.students, self.classroom_capacity });
+                try self.log.err("Too many students for {s}-{}: {} (max is {})\n", .{ course.name, section.n, section.students, self.classroom_capacity });
                 return Error.TooManyStudents;
             }
         }
