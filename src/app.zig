@@ -87,30 +87,107 @@ pub const App = struct {
     }
 
     pub fn learn(self: *Self) !void {
-        try self.solutions.resize(0);
+        const Cb = struct {
+            const My = @This();
 
-        var lessons: []mdl.Lesson = &.{};
-        defer self.a.free(lessons);
+            app: *Self,
+            job: usize,
+            a: std.mem.Allocator,
+            log: *const rubr.log.Log,
+            iterations: usize,
+            bestUnfit: *usize,
+            mutex: *std.Thread.Mutex,
 
-        for (0..self.iterations) |iteration| {
-            std.debug.print("Iteration {}\n", .{iteration});
-
-            var regen_lessons: bool = iteration == 0;
-            if (self.regen_count) |regen_count| {
-                if (iteration % regen_count == 0)
-                    regen_lessons = true;
+            pub fn init(my: *My, app: *Self, job: usize, iterations: usize, bestUnfit: *usize, mutex: *std.Thread.Mutex) void {
+                my.app = app;
+                my.job = job;
+                my.a = app.a;
+                my.log = app.log;
+                my.iterations = iterations;
+                my.bestUnfit = bestUnfit;
+                my.mutex = mutex;
             }
-
-            if (regen_lessons) {
-                std.debug.print("  Regenerating Lessons\n", .{});
-                self.a.free(lessons);
-                lessons = try self.createLessons(SplitStrategy.Random);
+            pub fn deinit(my: *My) void {
+                _ = my;
             }
-
-            const maybe_solution = self.fit(lessons) catch null;
-            if (maybe_solution) |solution| {
-                try self.solutions.append(solution);
+            pub fn call(my: *My) void {
+                my.call_() catch {};
             }
+            fn call_(my: *My) !void {
+                var maybeBestSolution: ?Solution = null;
+
+                for (0..my.iterations) |iteration| {
+                    if (my.log.level(2)) |w|
+                        try w.info("Job {}, iteration {}\n", .{ my.job, iteration });
+
+                    const lessons: []mdl.Lesson = try my.app.createLessons(SplitStrategy.Random);
+                    defer my.a.free(lessons);
+
+                    // If we make it this far, let's dig a bit deeper
+                    const max_step_factor: usize = if (iteration <= 500) 1 else 10;
+
+                    var maybeSolution = my.app.fit(lessons, max_step_factor) catch null;
+                    if (maybeSolution) |*solution| {
+                        if (maybeBestSolution) |*bestSolution| {
+                            defer solution.deinit();
+                            if (solution.unfit <= bestSolution.unfit) {
+                                std.mem.swap(Solution, solution, bestSolution);
+
+                                if (my.log.level(1)) |w|
+                                    try w.info("Found better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, bestSolution.unfit });
+
+                                my.mutex.lock();
+                                defer my.mutex.unlock();
+                                if (bestSolution.unfit <= my.bestUnfit.*) {
+                                    my.bestUnfit.* = bestSolution.unfit;
+                                    try my.log.print("\nFound better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, my.bestUnfit.* });
+                                    try bestSolution.schedule.write(my.log.writer(), my.app.model);
+                                }
+                            }
+                        } else {
+                            maybeBestSolution = solution.*;
+                        }
+                    }
+
+                    var bestSolution = &(maybeBestSolution orelse unreachable);
+                    var lowPerformer: bool = false;
+                    if (iteration >= 100 and bestSolution.unfit > 20)
+                        lowPerformer = true;
+                    if (iteration >= 500 and bestSolution.unfit > 5)
+                        lowPerformer = true;
+                    if (lowPerformer) {
+                        if (my.log.level(1)) |w|
+                            try w.info("Job {} is a low performer: unfit {} at iteration {}\n", .{ my.job, bestSolution.unfit, iteration });
+                        bestSolution.deinit();
+                        maybeBestSolution = null;
+                        break;
+                    }
+                }
+
+                if (maybeBestSolution) |bestSolution| {
+                    my.mutex.lock();
+                    defer my.mutex.unlock();
+                    try my.app.solutions.append(bestSolution);
+                    maybeBestSolution = null;
+                }
+
+                my.deinit();
+            }
+        };
+
+        const jobCount = self.regen_count orelse 1;
+        const iterationsPerJob = self.iterations;
+        var bestUnfit: usize = std.math.maxInt(usize);
+        std.debug.print("jobCount {} iterationsPerJob {}\n", .{ jobCount, iterationsPerJob });
+        var mutex = std.Thread.Mutex{};
+
+        var threadPool: std.Thread.Pool = undefined;
+        try threadPool.init(.{ .allocator = self.a, .n_jobs = 32 });
+        defer threadPool.deinit();
+        for (0..jobCount) |job| {
+            const cb = try self.a.create(Cb);
+            cb.init(self, job, iterationsPerJob, &bestUnfit, &mutex);
+            try threadPool.spawn(Cb.call, .{cb});
         }
     }
 
@@ -152,7 +229,7 @@ pub const App = struct {
         }
     }
 
-    pub fn fit(self: *Self, all_lessons: []mdl.Lesson) !?Solution {
+    pub fn fit(self: *Self, all_lessons: []mdl.Lesson, max_step_factor: usize) !?Solution {
         var schedule = mdl.Schedule.init(self.a);
         defer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
@@ -169,16 +246,23 @@ pub const App = struct {
         const rng = self.prng.random();
         rng.shuffle(mdl.Lesson, lessons_to_fit);
 
-        var fitData = FitData{};
-        defer fitData.deinit();
-        if (self.fit_(lessons_to_fit, &schedule, &fitData)) |ok| {
-            if (ok)
-                try self.log.info("Found solution!\n", .{})
-            else
-                try self.log.info("Could not find solution\n", .{});
+        var fit_data = FitData{};
+        defer fit_data.deinit();
+        fit_data.max_steps = self.max_steps;
+        if (fit_data.max_steps) |*max_steps|
+            max_steps.* *= max_step_factor;
+
+        if (self.fit_(lessons_to_fit, &schedule, &fit_data)) |ok| {
+            if (ok) {
+                try self.log.info("Found solution!\n", .{});
+            } else {
+                // try self.log.info("Could not find solution\n", .{});
+            }
         } else |err| {
             switch (err) {
-                Error.Stop => try self.log.info("Stopping search\n", .{}),
+                Error.Stop => {
+                    // try self.log.info("Stopping search\n", .{});
+                },
                 else => {
                     try self.log.err("Something went wrong during search: {}\n", .{err});
                     return err;
@@ -186,8 +270,8 @@ pub const App = struct {
             }
         }
 
-        if (fitData.maybe_solution) |solution| {
-            defer fitData.maybe_solution = null;
+        if (fit_data.maybe_solution) |solution| {
+            defer fit_data.maybe_solution = null;
             return solution;
         }
 
@@ -195,6 +279,7 @@ pub const App = struct {
     }
 
     const FitData = struct {
+        max_steps: ?usize = null,
         step: usize = 0,
         maybe_solution: ?Solution = null,
 
@@ -218,8 +303,8 @@ pub const App = struct {
             return is_better;
         }
     };
-    fn fit_(self: Self, lessons: []mdl.Lesson, schedule: *mdl.Schedule, fitData: *FitData) !bool {
-        if (try fitData.store(lessons.len, schedule.*)) {
+    fn fit_(self: Self, lessons: []mdl.Lesson, schedule: *mdl.Schedule, fit_data: *FitData) !bool {
+        if (try fit_data.store(lessons.len, schedule.*)) {
             if (self.log.level(1)) |w| {
                 try w.print("Found better fit, still {} Lessons not fitted\n", .{lessons.len});
                 for (lessons) |lesson| {
@@ -238,11 +323,11 @@ pub const App = struct {
             // No more lessons to fit: we are done and found a fitting solution
             return true;
 
-        if (self.max_steps) |max_steps| {
-            if (fitData.step >= max_steps)
+        if (fit_data.max_steps) |maxSteps| {
+            if (fit_data.step >= maxSteps)
                 return Error.Stop;
         }
-        fitData.step += 1;
+        fit_data.step += 1;
 
         if (self.model.findGap(schedule)) |gap| {
             // There is a gap to fill for some Group: fill this first
@@ -296,7 +381,7 @@ pub const App = struct {
                         }
                         std.mem.swap(mdl.Lesson, lesson, &lessons[0]);
 
-                        if (try self.fit_(lessons[1..], schedule, fitData))
+                        if (try self.fit_(lessons[1..], schedule, fit_data))
                             return true;
 
                         already_tested_mask |= section_mask;
@@ -334,7 +419,7 @@ pub const App = struct {
                     try schedule.write(w, self.model);
                 }
 
-                if (try self.fit_(lessons[1..], schedule, fitData))
+                if (try self.fit_(lessons[1..], schedule, fit_data))
                     return true;
 
                 if (self.log.level(1)) |w|

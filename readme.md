@@ -33,9 +33,8 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Fit Lessons that belong to a Section that is not given to the whole Group
 - [x] Only try to fit a single Lesson belonging to a Section
 - [x] Do not try to fit a Lesson in more that one empty Hour
-- [ ] Compute 'hours_per_week' from data
-- [/] Process recursively
-	- [*] Try different random splits of a Course into Sections
+- [x] Process recursively
+	- [x] Try different random splits of a Course into Sections
 	- [x] Fit Lessons for Classes in a Group where other Classes are already scheduled
 	- [x] Single-shot fitting: the first slot that fits is take, not backtracking
 	- [x] Try all available slots for a Lesson
@@ -43,7 +42,7 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Sort solutions by score
 - [x] Do not add classes with 0 students
 - [x] Sort classes per group
-- [/] Rework pier.mdl to support MT search of Sections and Schedule
+- [x] Rework pier.mdl to support MT search of Sections and Schedule
 	- [x] Check Section use
 		- Access Course name
 		- Keep mask of already tested Sections based on Section.n
@@ -56,7 +55,9 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 		- [x] Split Courses into single Lessons
 		- [x] Copy Lessons for the required hourse
 	- [x] Rework `fit()` to use `[]Lesson` iso `[]Lesson.Ix`
-		- [*] Remove Model.lessons
+		- [x] Remove Model.lessons
+	- [x] Regen Lessons from time to time
+	- [x] Compute each regen in a different thread using std.Thread.Pool
 - [ ] Take Constraints into account
 
 # Terms
