@@ -31,40 +31,20 @@ pub const Solution = struct {
 
 pub const App = struct {
     const Self = @This();
-    const FitData = struct {
-        step: usize = 0,
-        maybe_solution: ?Solution = null,
-
-        fn deinit(self: *FitData) void {
-            if (self.maybe_solution) |*solution|
-                solution.deinit();
-        }
-
-        fn store(self: *FitData, unfit: usize, schedule: mdl.Schedule) !bool {
-            var is_better: bool = false;
-            if (self.maybe_solution) |*solution| {
-                if (unfit < solution.unfit) {
-                    solution.unfit = unfit;
-                    try solution.schedule.assign(schedule);
-                    is_better = true;
-                }
-            } else {
-                self.maybe_solution = Solution{ .schedule = try schedule.copy(), .unfit = unfit };
-                is_better = true;
-            }
-            return is_better;
-        }
-    };
+    const Solutions = std.ArrayList(Solution);
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
     hours_per_week: usize = 0,
     classroom_capacity: usize = 0,
+    iterations: usize = 0,
+    output_dir: ?[]const u8 = null,
     lesson_table: csv.Table,
     count: mdl.Count = .{},
     max_steps: ?usize = null,
     model: mdl.Model,
     prng: std.Random.DefaultPrng,
+    solutions: Solutions,
 
     pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log) Self {
         return Self{
@@ -77,18 +57,21 @@ pub const App = struct {
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
             .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
+            .solutions = Solutions.init(a),
         };
     }
     pub fn deinit(self: *Self) void {
         self.lesson_table.deinit();
         self.model.deinit();
+        for (self.solutions.items) |*solution|
+            solution.deinit();
+        self.solutions.deinit();
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
         self.max_steps = config.max_steps;
-        if (config.output_dir) |output_dir| {
-            try std.fs.cwd().makePath(output_dir);
-        }
+        self.iterations = config.iterations;
+        self.output_dir = config.output_dir;
 
         const input_fp = config.input_fp orelse {
             try self.log.err("Please specify an input file\n", .{});
@@ -100,6 +83,56 @@ pub const App = struct {
         try self.model.alloc(self.count);
         try self.loadData();
         try self.createLessons(SplitStrategy.Random);
+    }
+
+    pub fn learn(self: *Self) !void {
+        try self.solutions.resize(0);
+
+        for (0..self.iterations) |iteration| {
+            std.debug.print("Iteration {}\n", .{iteration});
+            const maybe_solution = self.fit() catch null;
+            if (maybe_solution) |solution| {
+                try self.solutions.append(solution);
+            }
+        }
+    }
+
+    pub fn writeOutput(self: *Self) !void {
+        const Fn = struct {
+            pub fn ascending(_: void, x: Solution, y: Solution) bool {
+                return x.unfit < y.unfit;
+            }
+            pub fn descending(_: void, x: Solution, y: Solution) bool {
+                return y.unfit < x.unfit;
+            }
+        };
+
+        if (self.output_dir) |output_dir| {
+            std.sort.block(Solution, self.solutions.items, {}, Fn.ascending);
+            try std.fs.cwd().makePath(output_dir);
+        } else {
+            std.sort.block(Solution, self.solutions.items, {}, Fn.descending);
+        }
+
+        for (self.solutions.items, 0..) |solution, ix| {
+            if (ix >= 10)
+                // Enough output
+                break;
+
+            var output_log = rubr.log.Log{};
+            output_log.init();
+            defer output_log.deinit();
+
+            if (self.output_dir) |output_dir| {
+                const fp = try std.fmt.allocPrint(self.a, "{s}/solution-{:02}.txt", .{ output_dir, ix });
+                defer self.a.free(fp);
+
+                try output_log.toFile(fp);
+            }
+
+            try output_log.print("Unfit {}\n", .{solution.unfit});
+            try solution.schedule.write(output_log.writer(), self.model);
+        }
     }
 
     pub fn fit(self: *Self) !?Solution {
@@ -147,6 +180,30 @@ pub const App = struct {
         return null;
     }
 
+    const FitData = struct {
+        step: usize = 0,
+        maybe_solution: ?Solution = null,
+
+        fn deinit(self: *FitData) void {
+            if (self.maybe_solution) |*solution|
+                solution.deinit();
+        }
+
+        fn store(self: *FitData, unfit: usize, schedule: mdl.Schedule) !bool {
+            var is_better: bool = false;
+            if (self.maybe_solution) |*solution| {
+                if (unfit < solution.unfit) {
+                    solution.unfit = unfit;
+                    try solution.schedule.assign(schedule);
+                    is_better = true;
+                }
+            } else {
+                self.maybe_solution = Solution{ .schedule = try schedule.copy(), .unfit = unfit };
+                is_better = true;
+            }
+            return is_better;
+        }
+    };
     fn fit_(self: Self, lessons: []mdl.Lesson, schedule: *mdl.Schedule, fitData: *FitData) !bool {
         if (try fitData.store(lessons.len, schedule.*)) {
             if (self.log.level(1)) |w| {

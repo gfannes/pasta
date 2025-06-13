@@ -21,8 +21,9 @@ pub const Config = struct {
     verbose: usize = 0,
     input_fp: ?[]const u8 = null,
     output_dir: ?[]const u8 = null,
+    iterations: usize = 1,
     max_steps: ?usize = null,
-    n: usize = 1,
+    regen_count: ?usize = null,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a, .args = rubr.cli.Args.init(a) };
@@ -46,7 +47,7 @@ pub const Config = struct {
             } else if (arg.is("-o", "--output")) {
                 self.output_dir = (self.args.pop() orelse return Error.ExpectedFolder).arg;
             } else if (arg.is("-n", "--iterations")) {
-                self.n = try (self.args.pop() orelse return Error.ExpectedFolder).as(usize);
+                self.iterations = try (self.args.pop() orelse return Error.ExpectedFolder).as(usize);
             } else if (arg.is("-m", "--max-step")) {
                 self.max_steps = try (self.args.pop() orelse return Error.ExpectedFolder).as(usize);
             } else {
@@ -63,6 +64,7 @@ pub const Config = struct {
         try w.print("    -o/--output FOLDER      Output folder\n", .{});
         try w.print("    -n/--iterations COUNT   Number of iterations to process [optional, default is 1]\n", .{});
         try w.print("    -m/--max-step COUNT     Maximum number of steps per iteration [optional, default is no max]\n", .{});
+        try w.print("    -r/--regen COUNT        Regenerate lessons after COUNT iterations [optional, default is never]\n", .{});
         try w.print("Developed by Geert Fannes\n", .{});
     }
 };
