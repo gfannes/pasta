@@ -36,7 +36,8 @@ pub const App = struct {
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
     hours_per_week: usize = 0,
-    classroom_capacity: usize = 0,
+    max_students: usize = 0,
+    min_students: usize = 0,
     iterations: usize = 0,
     regen_count: ?usize = null,
     output_dir: ?[]const u8 = null,
@@ -51,10 +52,9 @@ pub const App = struct {
         return Self{
             .a = a,
             .log = log,
-            // &todo: set to 32
             .hours_per_week = 32,
-            // &todo: set to 26
-            .classroom_capacity = 26,
+            .max_students = 26,
+            .min_students = 20,
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
             .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
@@ -118,7 +118,7 @@ pub const App = struct {
 
                 for (0..my.iterations) |iteration| {
                     if (my.log.level(2)) |w|
-                        try w.info("Job {}, iteration {}\n", .{ my.job, iteration });
+                        try w.print("Job {}, iteration {}\n", .{ my.job, iteration });
 
                     const lessons: []mdl.Lesson = try my.app.createLessons(SplitStrategy.Random);
                     defer my.a.free(lessons);
@@ -134,7 +134,7 @@ pub const App = struct {
                                 std.mem.swap(Solution, solution, bestSolution);
 
                                 if (my.log.level(1)) |w|
-                                    try w.info("Found better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, bestSolution.unfit });
+                                    try w.print("Found better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, bestSolution.unfit });
 
                                 my.mutex.lock();
                                 defer my.mutex.unlock();
@@ -157,7 +157,7 @@ pub const App = struct {
                         lowPerformer = true;
                     if (lowPerformer) {
                         if (my.log.level(1)) |w|
-                            try w.info("Job {} is a low performer: unfit {} at iteration {}\n", .{ my.job, bestSolution.unfit, iteration });
+                            try w.print("Job {} is a low performer: unfit {} at iteration {}\n", .{ my.job, bestSolution.unfit, iteration });
                         bestSolution.deinit();
                         maybeBestSolution = null;
                         break;
@@ -676,13 +676,16 @@ pub const App = struct {
                             std.sort.block(mdl.Lesson, my_lessons, {}, Fn.call);
                             const small = &my_lessons[my_lessons.len - 1];
                             const large = &my_lessons[my_lessons.len - 2];
-                            if (small.students + large.students > self.classroom_capacity)
+                            if (small.students + large.students > self.max_students)
                                 break;
 
                             large.students += small.students;
                             large.classes.mask |= small.classes.mask;
 
                             try single_lessons.resize(single_lessons.items.len - 1);
+
+                            if (large.students >= self.min_students)
+                                break;
                         }
                     },
                     SplitStrategy.Random => {
@@ -705,7 +708,7 @@ pub const App = struct {
                             const class = class_ix.cptr(self.model.classes);
 
                             if (maybe_lesson) |*lesson| {
-                                if (lesson.students + class.count <= self.classroom_capacity) {
+                                if (lesson.students + class.count <= self.max_students) {
                                     lesson.students += class.count;
                                     lesson.classes.add(class_ix.ix);
                                 } else {
@@ -720,6 +723,14 @@ pub const App = struct {
                                     .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
                                     .students = class.count,
                                 };
+                            }
+
+                            if (maybe_lesson) |lesson| {
+                                if (lesson.students >= self.min_students) {
+                                    // This Lesson is full enough. If we try to fill it to max_students, small Classes end-up blocking the search.
+                                    try single_lessons.append(lesson);
+                                    maybe_lesson = null;
+                                }
                             }
                         }
                         if (maybe_lesson) |lesson|
@@ -747,7 +758,7 @@ pub const App = struct {
                 return Error.TooManySections;
 
             for (single_lessons.items) |lesson| {
-                if (lesson.students > self.classroom_capacity) {
+                if (lesson.students > self.max_students) {
                     return Error.TooManyStudents;
                 }
             }
