@@ -38,6 +38,7 @@ pub const App = struct {
     hours_per_week: usize = 0,
     classroom_capacity: usize = 0,
     iterations: usize = 0,
+    regen_count: ?usize = null,
     output_dir: ?[]const u8 = null,
     lesson_table: csv.Table,
     count: mdl.Count = .{},
@@ -71,6 +72,7 @@ pub const App = struct {
     pub fn setup(self: *Self, config: cfg.Config) !void {
         self.max_steps = config.max_steps;
         self.iterations = config.iterations;
+        self.regen_count = config.regen_count;
         self.output_dir = config.output_dir;
 
         const input_fp = config.input_fp orelse {
@@ -82,15 +84,30 @@ pub const App = struct {
         self.count = try deriveCounts(self.lesson_table, self.log);
         try self.model.alloc(self.count);
         try self.loadData();
-        try self.createLessons(SplitStrategy.Random);
     }
 
     pub fn learn(self: *Self) !void {
         try self.solutions.resize(0);
 
+        var lessons: []mdl.Lesson = &.{};
+        defer self.a.free(lessons);
+
         for (0..self.iterations) |iteration| {
             std.debug.print("Iteration {}\n", .{iteration});
-            const maybe_solution = self.fit() catch null;
+
+            var regen_lessons: bool = iteration == 0;
+            if (self.regen_count) |regen_count| {
+                if (iteration % regen_count == 0)
+                    regen_lessons = true;
+            }
+
+            if (regen_lessons) {
+                std.debug.print("  Regenerating Lessons\n", .{});
+                self.a.free(lessons);
+                lessons = try self.createLessons(SplitStrategy.Random);
+            }
+
+            const maybe_solution = self.fit(lessons) catch null;
             if (maybe_solution) |solution| {
                 try self.solutions.append(solution);
             }
@@ -135,13 +152,10 @@ pub const App = struct {
         }
     }
 
-    pub fn fit(self: *Self) !?Solution {
+    pub fn fit(self: *Self, all_lessons: []mdl.Lesson) !?Solution {
         var schedule = mdl.Schedule.init(self.a);
         defer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
-
-        const all_lessons = try self.a.dupe(mdl.Lesson, self.model.lessons);
-        defer self.a.free(all_lessons);
 
         const lessons_to_fit = self.deriveLessonsToFit(all_lessons);
         if (self.log.level(1)) |w| {
@@ -512,7 +526,7 @@ pub const App = struct {
         PerGroup_MergeSmall,
         Random,
     };
-    fn createLessons(self: *Self, splitStrategy: SplitStrategy) !void {
+    fn createLessons(self: *Self, splitStrategy: SplitStrategy) ![]mdl.Lesson {
         // Split the Courses into single Lessons, making sure they do not exceed the classroom_capacity
         var single_lessons = std.ArrayList(mdl.Lesson).init(self.a);
         defer single_lessons.deinit();
@@ -658,18 +672,20 @@ pub const App = struct {
         for (single_lessons.items) |lesson|
             lesson_count += lesson.course.cptr(self.model.courses).hours;
 
-        self.model.lessons = try self.a.alloc(mdl.Lesson, lesson_count);
-        self.model.lessons.len = 0;
+        var lessons = try self.a.alloc(mdl.Lesson, lesson_count);
+        lessons.len = 0;
         for (single_lessons.items) |single_lesson| {
             const course = single_lesson.course.cptr(self.model.courses);
             for (0..course.hours) |hour| {
                 var lesson = single_lesson;
                 lesson.hour = hour;
 
-                self.model.lessons.len += 1;
-                self.model.lessons[self.model.lessons.len - 1] = lesson;
+                lessons.len += 1;
+                lessons[lessons.len - 1] = lesson;
             }
         }
-        std.debug.assert(lesson_count == self.model.lessons.len);
+        std.debug.assert(lesson_count == lessons.len);
+
+        return lessons;
     }
 };

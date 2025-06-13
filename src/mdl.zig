@@ -19,7 +19,6 @@ pub const Model = struct {
     classes: []Class = &.{},
     groups: []Group = &.{},
     courses: []Course = &.{},
-    lessons: []Lesson = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Model{ .a = a };
@@ -31,7 +30,6 @@ pub const Model = struct {
 
         self.a.free(self.groups);
         self.a.free(self.courses);
-        self.a.free(self.lessons);
     }
     pub fn alloc(self: *Self, count: Count) !void {
         self.classes = try self.a.alloc(Class, count.classes);

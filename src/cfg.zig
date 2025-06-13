@@ -5,6 +5,7 @@ pub const Error = error{
     CouldNotFindExecutable,
     ExpectedFilepath,
     ExpectedFolder,
+    ExpectedNumber,
     UnsupportedArgument,
 };
 
@@ -41,15 +42,17 @@ pub const Config = struct {
             if (arg.is("-h", "--help")) {
                 self.print_help = true;
             } else if (arg.is("-v", "--verbose")) {
-                self.verbose = try (self.args.pop() orelse return Error.ExpectedFilepath).as(usize);
+                self.verbose = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else if (arg.is("-i", "--input")) {
                 self.input_fp = (self.args.pop() orelse return Error.ExpectedFilepath).arg;
             } else if (arg.is("-o", "--output")) {
                 self.output_dir = (self.args.pop() orelse return Error.ExpectedFolder).arg;
             } else if (arg.is("-n", "--iterations")) {
-                self.iterations = try (self.args.pop() orelse return Error.ExpectedFolder).as(usize);
+                self.iterations = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
+            } else if (arg.is("-r", "--regen")) {
+                self.regen_count = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else if (arg.is("-m", "--max-step")) {
-                self.max_steps = try (self.args.pop() orelse return Error.ExpectedFolder).as(usize);
+                self.max_steps = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else {
                 return Error.UnsupportedArgument;
             }

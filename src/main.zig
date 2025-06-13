@@ -1,8 +1,7 @@
 const std = @import("std");
-const app = @import("app.zig");
 const cfg = @import("cfg.zig");
-const mdl = @import("mdl.zig");
 const rubr = @import("rubr.zig");
+const app = @import("app.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -17,15 +16,16 @@ pub fn main() !void {
     log.init();
     defer log.deinit();
 
+    log.setLevel(config.verbose);
+
     if (config.print_help) {
         try config.print(log.writer());
         return;
     }
 
-    log.setLevel(config.verbose);
-
     var myApp = app.App.init(a, &log);
     defer myApp.deinit();
+
     try myApp.setup(config);
 
     try myApp.learn();
