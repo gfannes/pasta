@@ -43,6 +43,20 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Sort solutions by score
 - [x] Do not add classes with 0 students
 - [x] Sort classes per group
+- [/] Rework pier.mdl to support MT search of Sections and Schedule
+	- [x] Check Section use
+		- Access Course name
+		- Keep mask of already tested Sections based on Section.n
+		- Uses Class.Mask to efficiently check if it fits in the Schedule
+		- Uses Section.n during print
+	- [x] Move Section.course to Lesson.course
+	- [x] Move Section.classes to Lesson.classes
+	- [x] Move Section.n into Lesson.section
+	- [x] Merge `splitCourses()` and `createLessons()`
+		- [x] Split Courses into single Lessons
+		- [x] Copy Lessons for the required hourse
+	- [x] Rework `fit()` to use `[]Lesson` iso `[]Lesson.Ix`
+		- [*] Remove Model.lessons
 - [ ] Take Constraints into account
 
 # Terms

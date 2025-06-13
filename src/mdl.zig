@@ -9,17 +9,16 @@ pub const Count = struct {
     classes: usize = 0,
     groups: usize = 0,
     courses: usize = 0,
-    sections: usize = 0,
 };
 
 pub const Model = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
+
     classes: []Class = &.{},
     groups: []Group = &.{},
     courses: []Course = &.{},
-    sections: []Section = &.{},
     lessons: []Lesson = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -32,7 +31,6 @@ pub const Model = struct {
 
         self.a.free(self.groups);
         self.a.free(self.courses);
-        self.a.free(self.sections);
         self.a.free(self.lessons);
     }
     pub fn alloc(self: *Self, count: Count) !void {
@@ -80,13 +78,6 @@ pub const Model = struct {
                     try w.print(" {s}", .{class_ix.cptr(self.classes).name});
                 try w.print("\n", .{});
             }
-            for (self.sections) |section| {
-                try w.print("Section for Course '{s}' ({}): ", .{ section.course.cptr(self.courses).name, section.students });
-                var it = section.classes.iterator();
-                while (it.next()) |class_ix|
-                    try w.print(" {s}", .{class_ix.cptr(self.classes).name});
-                try w.print("\n", .{});
-            }
         }
     }
 };
@@ -95,7 +86,7 @@ pub const Schedule = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
-    hour__class__lesson: [][]?Lesson.Ix = &.{},
+    hour__class__lesson: [][]?Lesson = &.{},
     hour__classes: []ClassSet = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -110,20 +101,20 @@ pub const Schedule = struct {
     pub fn copy(self: Self) !Self {
         var ret = Self.init(self.a);
         errdefer ret.deinit();
-        ret.hour__class__lesson = try ret.a.alloc([]?Lesson.Ix, self.hour__class__lesson.len);
+        ret.hour__class__lesson = try ret.a.alloc([]?Lesson, self.hour__class__lesson.len);
         for (ret.hour__class__lesson, 0..) |*dst, ix| {
             const src = self.hour__class__lesson[ix];
-            dst.* = try ret.a.alloc(?Lesson.Ix, src.len);
-            std.mem.copyForwards(?Lesson.Ix, dst.*, src);
+            dst.* = try ret.a.alloc(?Lesson, src.len);
+            std.mem.copyForwards(?Lesson, dst.*, src);
         }
         ret.hour__classes = try ret.a.alloc(ClassSet, self.hour__classes.len);
         std.mem.copyForwards(ClassSet, ret.hour__classes, self.hour__classes);
         return ret;
     }
     pub fn alloc(self: *Self, hours: usize, classes: usize) !void {
-        self.hour__class__lesson = try self.a.alloc([]?Lesson.Ix, hours);
+        self.hour__class__lesson = try self.a.alloc([]?Lesson, hours);
         for (self.hour__class__lesson) |*class__lesson| {
-            class__lesson.* = try self.a.alloc(?Lesson.Ix, classes);
+            class__lesson.* = try self.a.alloc(?Lesson, classes);
             @memset(class__lesson.*, null);
         }
         self.hour__classes = try self.a.alloc(ClassSet, hours);
@@ -134,7 +125,7 @@ pub const Schedule = struct {
             return Error.WrongStructure;
         for (self.hour__class__lesson, 0..) |dst, ix| {
             const src = other.hour__class__lesson[ix];
-            std.mem.copyForwards(?Lesson.Ix, dst, src);
+            std.mem.copyForwards(?Lesson, dst, src);
         }
         std.mem.copyForwards(ClassSet, self.hour__classes, other.hour__classes);
     }
@@ -143,10 +134,10 @@ pub const Schedule = struct {
         return self.hour__classes[hour].mask == 0;
     }
 
-    pub fn isFree(self: Schedule, hour: usize, section: *const Section) bool {
+    pub fn isFree(self: Schedule, hour: usize, lesson: Lesson) bool {
         const class__lesson = self.hour__class__lesson[hour];
 
-        var it = section.classes.iterator();
+        var it = lesson.classes.iterator();
         while (it.next()) |class_ix| {
             if (class__lesson[class_ix.ix]) |blocking_lesson| {
                 _ = blocking_lesson;
@@ -157,27 +148,27 @@ pub const Schedule = struct {
         return true;
     }
 
-    pub fn insertLesson(self: *Schedule, hour: usize, section: *const Section, lesson_ix: ?Lesson.Ix) void {
+    pub fn updateLesson(self: *Schedule, hour: usize, lesson: Lesson, set: bool) void {
         const class__lesson = self.hour__class__lesson[hour];
-        var it = section.classes.iterator();
-        while (it.next()) |class_ix|
-            class__lesson[class_ix.ix] = lesson_ix;
+        var it = lesson.classes.iterator();
 
-        if (lesson_ix == null) {
-            self.hour__classes[hour].mask &= ~section.classes.mask;
+        if (set) {
+            while (it.next()) |class_ix|
+                class__lesson[class_ix.ix] = lesson;
+            self.hour__classes[hour].mask |= lesson.classes.mask;
         } else {
-            self.hour__classes[hour].mask |= section.classes.mask;
+            while (it.next()) |class_ix|
+                class__lesson[class_ix.ix] = null;
+            self.hour__classes[hour].mask &= ~lesson.classes.mask;
         }
     }
 
     pub fn write(self: Self, writer: rubr.log.Log.Writer, model: Model) !void {
         var max_width: usize = 0;
         for (self.hour__class__lesson) |class__lesson| {
-            for (class__lesson) |lesson_ix| {
-                if (lesson_ix) |ix| {
-                    const lesson = ix.cptr(model.lessons);
-                    const section = lesson.section.cptr(model.sections);
-                    const course = section.course.cptr(model.courses);
+            for (class__lesson) |maybe_lesson| {
+                if (maybe_lesson) |lesson| {
+                    const course = lesson.course.cptr(model.courses);
                     max_width = @max(max_width, course.name.len + 2);
                 }
             }
@@ -226,12 +217,10 @@ pub const Schedule = struct {
             for (model.groups) |group| {
                 var it = group.classes.iterator();
                 while (it.next()) |class_ix| {
-                    const lesson_ix = class__lesson[class_ix.ix];
-                    if (lesson_ix) |ix| {
-                        const lesson = ix.cptr(model.lessons);
-                        const section = lesson.section.cptr(model.sections);
-                        const course = section.course.cptr(model.courses);
-                        line.print("{s}-{}-{}", .{ course.name, section.n, lesson.hour });
+                    const maybe_lesson = class__lesson[class_ix.ix];
+                    if (maybe_lesson) |lesson| {
+                        const course = lesson.course.cptr(model.courses);
+                        line.print("{s}-{}-{}", .{ course.name, lesson.section, lesson.hour });
                     } else {
                         line.print("", .{});
                     }
@@ -298,21 +287,13 @@ pub const Course = struct {
     classes: ClassSet = .{},
 };
 
-pub const Section = struct {
-    const Self = @This();
-    pub const Ix = rubr.index.Ix(Section);
-
-    course: Course.Ix,
-    n: usize = 0,
-    students: usize = 0,
-    classes: ClassSet = .{},
-};
-
 pub const Lesson = struct {
     const Self = @This();
-    pub const Ix = rubr.index.Ix(Lesson);
 
-    section: Section.Ix = .{},
+    course: Course.Ix,
+    classes: ClassSet = .{},
+    students: usize = 0, // &todo remove this field
+    section: usize = 0, // A Course is split into different sections, each section respecting the classroom_capacity
     hour: usize = 0,
 };
 
