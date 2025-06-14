@@ -167,7 +167,7 @@ pub const Schedule = struct {
             for (class__lesson) |maybe_lesson| {
                 if (maybe_lesson) |lesson| {
                     const course = lesson.course.cptr(model.courses);
-                    max_width = @max(max_width, course.name.len + 2);
+                    max_width = @max(max_width, course.name.len + 2 + 2);
                 }
             }
         }
