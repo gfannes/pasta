@@ -689,52 +689,67 @@ pub const App = struct {
                         }
                     },
                     SplitStrategy.Random => {
-                        // Setup class_ixs as slice of Class.Ix
+                        // Setup class_ixs as slice of Class.Ix and compute total student count for this Course
                         var buffer: [Max.classes]mdl.Class.Ix = undefined;
                         var class_ixs: []mdl.Class.Ix = &buffer;
+                        var students: usize = 0;
                         class_ixs.len = 0;
                         var it = course.classes.iterator();
                         while (it.next()) |class_ix| {
                             class_ixs.len += 1;
                             class_ixs[class_ixs.len - 1] = class_ix;
-                        }
 
-                        // Shuffle class_ixs
-                        const rng = self.prng.random();
-                        rng.shuffle(mdl.Class.Ix, class_ixs);
-
-                        var maybe_lesson: ?mdl.Lesson = null;
-                        for (class_ixs) |class_ix| {
                             const class = class_ix.cptr(self.model.classes);
-
-                            if (maybe_lesson) |*lesson| {
-                                if (lesson.students + class.count <= self.max_students) {
-                                    lesson.students += class.count;
-                                    lesson.classes.add(class_ix.ix);
-                                } else {
-                                    try single_lessons.append(lesson.*);
-                                    maybe_lesson = null;
-                                }
-                            }
-
-                            if (maybe_lesson == null) {
-                                maybe_lesson = mdl.Lesson{
-                                    .course = mdl.Course.Ix.init(course_ix),
-                                    .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
-                                    .students = class.count,
-                                };
-                            }
-
-                            if (maybe_lesson) |lesson| {
-                                if (lesson.students >= self.min_students) {
-                                    // This Lesson is full enough. If we try to fill it to max_students, small Classes end-up blocking the search.
-                                    try single_lessons.append(lesson);
-                                    maybe_lesson = null;
-                                }
-                            }
+                            students += class.count;
                         }
-                        if (maybe_lesson) |lesson|
-                            try single_lessons.append(lesson);
+
+                        if (students <= self.max_students) {
+                            // All students fit in a single Lesson: do not shuffle and split
+                            // Especially because the check against min_students might result in more than 1 Lesson
+                            try single_lessons.append(mdl.Lesson{
+                                .course = mdl.Course.Ix.init(course_ix),
+                                .classes = course.classes,
+                                .students = students,
+                            });
+                        } else {
+                            // Shuffle class_ixs
+                            const rng = self.prng.random();
+                            rng.shuffle(mdl.Class.Ix, class_ixs);
+
+                            // Add Classes to Lessons until their size is in [min_students, max_students]
+                            var maybe_lesson: ?mdl.Lesson = null;
+                            for (class_ixs) |class_ix| {
+                                const class = class_ix.cptr(self.model.classes);
+
+                                if (maybe_lesson) |*lesson| {
+                                    if (lesson.students + class.count <= self.max_students) {
+                                        lesson.students += class.count;
+                                        lesson.classes.add(class_ix.ix);
+                                    } else {
+                                        try single_lessons.append(lesson.*);
+                                        maybe_lesson = null;
+                                    }
+                                }
+
+                                if (maybe_lesson == null) {
+                                    maybe_lesson = mdl.Lesson{
+                                        .course = mdl.Course.Ix.init(course_ix),
+                                        .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
+                                        .students = class.count,
+                                    };
+                                }
+
+                                if (maybe_lesson) |lesson| {
+                                    if (lesson.students >= self.min_students) {
+                                        // This Lesson is full enough. If we try to fill it to max_students, small Classes end-up blocking the search.
+                                        try single_lessons.append(lesson);
+                                        maybe_lesson = null;
+                                    }
+                                }
+                            }
+                            if (maybe_lesson) |lesson|
+                                try single_lessons.append(lesson);
+                        }
                     },
                 }
             }
