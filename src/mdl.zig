@@ -230,7 +230,7 @@ pub const Schedule = struct {
 
 pub const Class = struct {
     const Self = @This();
-    pub const Ix = rubr.index.Ix(Class);
+    pub const Ix = rubr.idx.Ix(Class);
 
     name: []const u8 = &.{},
     group: Group.Ix = .{},
@@ -270,7 +270,7 @@ pub const ClassSet = struct {
 
 pub const Group = struct {
     const Self = @This();
-    pub const Ix = rubr.index.Ix(Group);
+    pub const Ix = rubr.idx.Ix(Group);
 
     name: []const u8 = &.{},
     classes: ClassSet = .{},
@@ -278,7 +278,7 @@ pub const Group = struct {
 
 pub const Course = struct {
     const Self = @This();
-    pub const Ix = rubr.index.Ix(Course);
+    pub const Ix = rubr.idx.Ix(Course);
 
     name: []const u8 = &.{},
     hours: usize = 0,
