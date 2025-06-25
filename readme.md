@@ -20,7 +20,7 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Iteration count
 ## Output
 - [x] Terminal print-out
-- [*] A list of Schedules in `.csv` format, with a score
+- [x] A list of Schedules in `.csv` format, with a score
 - [x] Create folder with all output
 	- [-] Fail if folder already exists
 - [x] Add Section id to output
@@ -63,6 +63,7 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 	- A Course that fits in a single Lesson should not be split
 - [*] Produce Schedule that uses more Hours
 - [ ] Take Constraints into account
+- [*] Test on Windows
 
 # Terms
 

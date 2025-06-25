@@ -141,7 +141,7 @@ pub const App = struct {
                                 if (bestSolution.unfit <= my.bestUnfit.*) {
                                     my.bestUnfit.* = bestSolution.unfit;
                                     try my.log.print("\nFound better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, my.bestUnfit.* });
-                                    try bestSolution.schedule.write(my.log.writer(), my.app.model);
+                                    try bestSolution.schedule.write(my.log.writer(), my.app.model, .{});
                                 }
                             }
                         } else {
@@ -217,15 +217,17 @@ pub const App = struct {
             output_log.init();
             defer output_log.deinit();
 
+            var write_config: mdl.Schedule.WriteConfig = .{};
             if (self.output_dir) |output_dir| {
-                const fp = try std.fmt.allocPrint(self.a, "{s}/solution-{:02}.txt", .{ output_dir, ix });
+                const fp = try std.fmt.allocPrint(self.a, "{s}/solution-{:02}.csv", .{ output_dir, ix });
                 defer self.a.free(fp);
 
                 try output_log.toFile(fp);
+                write_config.mode = mdl.Schedule.WriteMode.Csv;
             }
 
-            try output_log.print("Unfit {}\n", .{solution.unfit});
-            try solution.schedule.write(output_log.writer(), self.model);
+            try output_log.print("Unfit,{}\n", .{solution.unfit});
+            try solution.schedule.write(output_log.writer(), self.model, write_config);
         }
     }
 
@@ -315,7 +317,7 @@ pub const App = struct {
                         try w.print(" {s}", .{class_ix.cptr(self.model.classes).name});
                     try w.print("\n", .{});
                 }
-                try schedule.write(w, self.model);
+                try schedule.write(w, self.model, .{});
             }
         }
 
@@ -377,7 +379,7 @@ pub const App = struct {
                         schedule.updateLesson(gap.hour, lesson.*, true);
                         if (self.log.level(1)) |w| {
                             try w.print("\tFitted Lesson {s}-{}-{} for {}\n", .{ course.name, lesson.section, lesson.hour, gap.hour });
-                            try schedule.write(w, self.model);
+                            try schedule.write(w, self.model, .{});
                         }
                         std.mem.swap(mdl.Lesson, lesson, &lessons[0]);
 
@@ -396,7 +398,7 @@ pub const App = struct {
             }
             if (self.log.level(1)) |w| {
                 try w.print("\tCould not fill Gap\n", .{});
-                try schedule.write(w, self.model);
+                try schedule.write(w, self.model, .{});
             }
         } else {
             // There is no Gap: fit the first Lesson, only fit it on an empty Hour once
@@ -416,7 +418,7 @@ pub const App = struct {
                 schedule.updateLesson(hour, lesson, true);
                 if (self.log.level(1)) |w| {
                     try w.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, lesson.section, lesson.hour, hour });
-                    try schedule.write(w, self.model);
+                    try schedule.write(w, self.model, .{});
                 }
 
                 if (try self.fit_(lessons[1..], schedule, fit_data))

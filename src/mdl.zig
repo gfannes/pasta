@@ -161,13 +161,18 @@ pub const Schedule = struct {
         }
     }
 
-    pub fn write(self: Self, writer: rubr.log.Log.Writer, model: Model) !void {
+    pub const WriteMode = enum { Table, Csv };
+    pub const WriteConfig = struct {
+        mode: ?WriteMode = null,
+    };
+    pub fn write(self: Self, writer: rubr.log.Log.Writer, model: Model, write_config: WriteConfig) !void {
         var max_width: usize = 0;
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
                 if (maybe_lesson) |lesson| {
                     const course = lesson.course.cptr(model.courses);
-                    max_width = @max(max_width, course.name.len + 2 + 2);
+                    const width = std.fmt.count("{s}-{}-{}", .{ course.name, lesson.section, lesson.hour });
+                    max_width = @max(max_width, width);
                 }
             }
         }
@@ -178,24 +183,36 @@ pub const Schedule = struct {
             width: usize,
             w: rubr.log.Log.Writer,
             buf: []u8 = &.{},
-            fn init(a: std.mem.Allocator, width: usize, w: rubr.log.Log.Writer) !My {
-                try w.print("|", .{});
-                return My{ .a = a, .width = width, .w = w, .buf = try a.alloc(u8, width) };
+            write_mode: WriteMode,
+            sep: []const u8 = "",
+            fn init(a: std.mem.Allocator, width: usize, w: rubr.log.Log.Writer, write_mode: WriteMode) !My {
+                if (write_mode == WriteMode.Table)
+                    try w.print("|", .{});
+                return My{ .a = a, .width = width, .w = w, .buf = try a.alloc(u8, width), .write_mode = write_mode };
             }
             fn deinit(my: *My) void {
                 my.w.print("\n", .{}) catch {};
                 my.a.free(my.buf);
             }
             fn print(my: *My, comptime fmt: []const u8, options: anytype) void {
-                for (my.buf) |*ch|
-                    ch.* = ' ';
-                _ = std.fmt.bufPrint(my.buf, fmt, options) catch {};
-                my.w.print(" {s} |", .{my.buf}) catch {};
+                switch (my.write_mode) {
+                    WriteMode.Table => {
+                        for (my.buf) |*ch|
+                            ch.* = ' ';
+                        _ = std.fmt.bufPrint(my.buf, fmt, options) catch {};
+                        my.w.print(" {s} |", .{my.buf}) catch {};
+                    },
+                    WriteMode.Csv => {
+                        const str = std.fmt.bufPrint(my.buf, fmt, options) catch "<error>";
+                        my.w.print("{s}{s}", .{ my.sep, str }) catch {};
+                        my.sep = ",";
+                    },
+                }
             }
         };
 
         {
-            var line = try Line.init(self.a, max_width, writer);
+            var line = try Line.init(self.a, max_width, writer, write_config.mode orelse WriteMode.Table);
             defer line.deinit();
             line.print("", .{});
             for (model.groups) |group| {
@@ -208,7 +225,7 @@ pub const Schedule = struct {
         }
 
         for (self.hour__class__lesson, 0..) |class__lesson, hour_ix| {
-            var line = try Line.init(self.a, max_width, writer);
+            var line = try Line.init(self.a, max_width, writer, write_config.mode orelse WriteMode.Table);
             defer line.deinit();
             // _ = hour_ix;
             line.print("{}", .{hour_ix});
