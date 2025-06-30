@@ -11,7 +11,7 @@ end
 desc 'Install'
 task :install do
     mode = :safe
-    # mode = :fast
+    mode = :fast
     # mode = :debug
 
     m = {safe: :safe, fast: :fast}[mode]

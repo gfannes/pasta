@@ -1,4 +1,6 @@
-&!:pier
+&!:pasta
+
+Pasta: checking if Courses can fit in a Schedule.
 
 Software to determine a minimal set of Sequences of interdependent Courses. These Sequences are the input for creating an actual Schedule.
 
@@ -42,7 +44,7 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 - [x] Sort solutions by score
 - [x] Do not add classes with 0 students
 - [x] Sort classes per group
-- [x] Rework pier.mdl to support MT search of Sections and Schedule
+- [x] Rework pasta.mdl to support MT search of Sections and Schedule
 	- [x] Check Section use
 		- Access Course name
 		- Keep mask of already tested Sections based on Section.n

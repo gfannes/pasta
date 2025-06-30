@@ -55,8 +55,6 @@ pub const App = struct {
             .a = a,
             .log = log,
             .hours_per_week = 32,
-            .max_students = 26,
-            .min_students = 20,
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
             .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
@@ -72,6 +70,8 @@ pub const App = struct {
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
+        self.min_students = config.min_students;
+        self.max_students = config.max_students;
         self.regen_count = config.regen_count;
         self.iterations = config.iterations;
         self.max_steps = config.max_steps;
@@ -152,7 +152,8 @@ pub const App = struct {
                     }
 
                     var best_solution = &(maybe_best_solution orelse unreachable);
-                    var low_performer: bool = false;
+                    var low_performer: bool = undefined;
+                    low_performer = false;
                     if (iteration >= 100 and best_solution.unfit > 20)
                         low_performer = true;
                     if (iteration >= 500 and best_solution.unfit > 5)

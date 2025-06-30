@@ -13,6 +13,8 @@ const Default = struct {
     const regen_count: usize = 100;
     const iterations: usize = 1000;
     const max_steps: usize = 10000;
+    const min_students: usize = 20;
+    const max_students: usize = 26;
 };
 
 pub const Config = struct {
@@ -31,6 +33,9 @@ pub const Config = struct {
     regen_count: usize = Default.regen_count,
     iterations: usize = Default.iterations,
     max_steps: usize = Default.max_steps,
+
+    min_students: usize = Default.min_students,
+    max_students: usize = Default.max_students,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a, .args = rubr.cli.Args.init(a) };
@@ -59,6 +64,10 @@ pub const Config = struct {
                 self.iterations = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else if (arg.is("-m", "--max-step")) {
                 self.max_steps = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
+            } else if (arg.is("-s", "--min-students")) {
+                self.min_students = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
+            } else if (arg.is("-S", "--max-students")) {
+                self.max_students = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else {
                 return Error.UnsupportedArgument;
             }
@@ -74,6 +83,8 @@ pub const Config = struct {
         try w.print("    -r/--regen COUNT        Number of sets of lessons to generate and test [optional, default is {}]\n", .{Default.regen_count});
         try w.print("    -n/--iterations COUNT   Number of iterations to process for each generated set of lessons [optional, default is {}]\n", .{Default.iterations});
         try w.print("    -m/--max-step COUNT     Maximum number of steps to take per iteration [optional, default is {}]\n", .{Default.max_steps});
+        try w.print("    -s/--min-students COUNT Minimal number of students before a new Lesson is created [optional, default is {}]\n", .{Default.min_students});
+        try w.print("    -S/--max-students COUNT Maximal number of students before a new Lesson is created [optional, default is {}]\n", .{Default.max_students});
         const description =
             \\After reading the input configuration, Courses are split into Lessons, given to random groups of Classes are created with size between 20 and 26 students.
             \\The number of different random splits that are tested is controlled by the '--regen' parameter. Note that each different random split can be processed on a different CPU.
