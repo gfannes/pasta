@@ -12,6 +12,8 @@ pub const Error = error{
     TooManySections,
     TooManyStudents,
     Stop,
+    RegenCountTooLow,
+    IterationsTooLow,
 };
 
 const Max = struct {
@@ -39,11 +41,11 @@ pub const App = struct {
     max_students: usize = 0,
     min_students: usize = 0,
     iterations: usize = 0,
-    regen_count: ?usize = null,
+    regen_count: usize = 0,
+    max_steps: usize = 0,
     output_dir: ?[]const u8 = null,
     lesson_table: csv.Table,
     count: mdl.Count = .{},
-    max_steps: ?usize = null,
     model: mdl.Model,
     prng: std.Random.DefaultPrng,
     solutions: Solutions,
@@ -70,9 +72,9 @@ pub const App = struct {
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
-        self.max_steps = config.max_steps;
-        self.iterations = config.iterations;
         self.regen_count = config.regen_count;
+        self.iterations = config.iterations;
+        self.max_steps = config.max_steps;
         self.output_dir = config.output_dir;
 
         const input_fp = config.input_fp orelse {
@@ -91,20 +93,20 @@ pub const App = struct {
             const My = @This();
 
             app: *Self,
-            job: usize,
+            regen: usize,
             a: std.mem.Allocator,
             log: *const rubr.log.Log,
             iterations: usize,
-            bestUnfit: *usize,
+            best_unfit: *usize,
             mutex: *std.Thread.Mutex,
 
-            pub fn init(my: *My, app: *Self, job: usize, iterations: usize, bestUnfit: *usize, mutex: *std.Thread.Mutex) void {
+            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, best_unfit: *usize, mutex: *std.Thread.Mutex) void {
                 my.app = app;
-                my.job = job;
+                my.regen = regen;
                 my.a = app.a;
                 my.log = app.log;
                 my.iterations = iterations;
-                my.bestUnfit = bestUnfit;
+                my.best_unfit = best_unfit;
                 my.mutex = mutex;
             }
             pub fn deinit(my: *My) void {
@@ -114,11 +116,11 @@ pub const App = struct {
                 my.call_() catch {};
             }
             fn call_(my: *My) !void {
-                var maybeBestSolution: ?Solution = null;
+                var maybe_best_solution: ?Solution = null;
 
                 for (0..my.iterations) |iteration| {
                     if (my.log.level(2)) |w|
-                        try w.print("Job {}, iteration {}\n", .{ my.job, iteration });
+                        try w.print("Regen {}, iteration {}\n", .{ my.regen, iteration });
 
                     const lessons: []mdl.Lesson = try my.app.createLessons(SplitStrategy.Random);
                     defer my.a.free(lessons);
@@ -126,68 +128,73 @@ pub const App = struct {
                     // If we make it this far, let's dig a bit deeper
                     const max_step_factor: usize = if (iteration <= 500) 1 else 10;
 
-                    var maybeSolution = my.app.fit(lessons, max_step_factor) catch null;
-                    if (maybeSolution) |*solution| {
-                        if (maybeBestSolution) |*bestSolution| {
+                    var maybe_solution = my.app.fit(lessons, max_step_factor) catch null;
+                    if (maybe_solution) |*solution| {
+                        if (maybe_best_solution) |*best_solution| {
                             defer solution.deinit();
-                            if (solution.unfit <= bestSolution.unfit) {
-                                std.mem.swap(Solution, solution, bestSolution);
+                            if (solution.unfit <= best_solution.unfit) {
+                                std.mem.swap(Solution, solution, best_solution);
 
                                 if (my.log.level(1)) |w|
-                                    try w.print("Found better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, bestSolution.unfit });
+                                    try w.print("Found better solution in regen {} iteration {}: unfit {}\n", .{ my.regen, iteration, best_solution.unfit });
 
                                 my.mutex.lock();
                                 defer my.mutex.unlock();
-                                if (bestSolution.unfit <= my.bestUnfit.*) {
-                                    my.bestUnfit.* = bestSolution.unfit;
-                                    try my.log.print("\nFound better solution in job {} iteration {}: unfit {}\n", .{ my.job, iteration, my.bestUnfit.* });
-                                    try bestSolution.schedule.write(my.log.writer(), my.app.model, .{});
+                                if (best_solution.unfit <= my.best_unfit.*) {
+                                    my.best_unfit.* = best_solution.unfit;
+                                    try my.log.print("\nFound better solution in regen {} iteration {}: unfit {}\n", .{ my.regen, iteration, my.best_unfit.* });
+                                    try best_solution.schedule.write(my.log.writer(), my.app.model, .{});
                                 }
                             }
                         } else {
-                            maybeBestSolution = solution.*;
+                            maybe_best_solution = solution.*;
                         }
                     }
 
-                    var bestSolution = &(maybeBestSolution orelse unreachable);
-                    var lowPerformer: bool = false;
-                    if (iteration >= 100 and bestSolution.unfit > 20)
-                        lowPerformer = true;
-                    if (iteration >= 500 and bestSolution.unfit > 5)
-                        lowPerformer = true;
-                    if (lowPerformer) {
+                    var best_solution = &(maybe_best_solution orelse unreachable);
+                    var low_performer: bool = false;
+                    if (iteration >= 100 and best_solution.unfit > 20)
+                        low_performer = true;
+                    if (iteration >= 500 and best_solution.unfit > 5)
+                        low_performer = true;
+                    if (low_performer) {
                         if (my.log.level(1)) |w|
-                            try w.print("Job {} is a low performer: unfit {} at iteration {}\n", .{ my.job, bestSolution.unfit, iteration });
-                        bestSolution.deinit();
-                        maybeBestSolution = null;
+                            try w.print("Regen {} is a low performer: unfit {} at iteration {}\n", .{ my.regen, best_solution.unfit, iteration });
+                        best_solution.deinit();
+                        maybe_best_solution = null;
                         break;
                     }
                 }
 
-                if (maybeBestSolution) |bestSolution| {
+                if (maybe_best_solution) |best_solution| {
                     my.mutex.lock();
                     defer my.mutex.unlock();
-                    try my.app.solutions.append(bestSolution);
-                    maybeBestSolution = null;
+                    try my.app.solutions.append(best_solution);
+                    maybe_best_solution = null;
                 }
 
+                const a = my.a;
                 my.deinit();
+                a.destroy(my);
             }
         };
 
-        const jobCount = self.regen_count orelse 1;
-        const iterationsPerJob = self.iterations;
-        var bestUnfit: usize = std.math.maxInt(usize);
-        std.debug.print("jobCount {} iterationsPerJob {}\n", .{ jobCount, iterationsPerJob });
+        if (self.regen_count <= 0)
+            return Error.RegenCountTooLow;
+        if (self.iterations <= 0)
+            return Error.IterationsTooLow;
+        var best_unfit: usize = std.math.maxInt(usize);
+        std.debug.print("Regen count: {},  iterations per regen {}\n", .{ self.regen_count, self.iterations });
         var mutex = std.Thread.Mutex{};
 
-        var threadPool: std.Thread.Pool = undefined;
-        try threadPool.init(.{ .allocator = self.a, .n_jobs = 32 });
-        defer threadPool.deinit();
-        for (0..jobCount) |job| {
+        var thread_pool: std.Thread.Pool = undefined;
+        try thread_pool.init(.{ .allocator = self.a, .n_jobs = 32 });
+        defer thread_pool.deinit();
+        for (0..self.regen_count) |regen| {
+            // Cb.call will deinit/destroy itself
             const cb = try self.a.create(Cb);
-            cb.init(self, job, iterationsPerJob, &bestUnfit, &mutex);
-            try threadPool.spawn(Cb.call, .{cb});
+            cb.init(self, regen, self.iterations, &best_unfit, &mutex);
+            try thread_pool.spawn(Cb.call, .{cb});
         }
     }
 
@@ -248,11 +255,9 @@ pub const App = struct {
         const rng = self.prng.random();
         rng.shuffle(mdl.Lesson, lessons_to_fit);
 
-        var fit_data = FitData{};
+        const max_steps = self.max_steps * max_step_factor;
+        var fit_data = FitData{ .max_steps = max_steps };
         defer fit_data.deinit();
-        fit_data.max_steps = self.max_steps;
-        if (fit_data.max_steps) |*max_steps|
-            max_steps.* *= max_step_factor;
 
         if (self.fit_(lessons_to_fit, &schedule, &fit_data)) |ok| {
             if (ok) {
@@ -281,7 +286,7 @@ pub const App = struct {
     }
 
     const FitData = struct {
-        max_steps: ?usize = null,
+        max_steps: usize,
         step: usize = 0,
         maybe_solution: ?Solution = null,
 
@@ -325,10 +330,8 @@ pub const App = struct {
             // No more lessons to fit: we are done and found a fitting solution
             return true;
 
-        if (fit_data.max_steps) |maxSteps| {
-            if (fit_data.step >= maxSteps)
-                return Error.Stop;
-        }
+        if (fit_data.step >= fit_data.max_steps)
+            return Error.Stop;
         fit_data.step += 1;
 
         if (self.model.findGap(schedule)) |gap| {
@@ -427,9 +430,6 @@ pub const App = struct {
                 if (self.log.level(1)) |w|
                     try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
                 schedule.updateLesson(hour, lesson, false);
-
-                // We try to fit a Lesson only in one place, for now
-                // break;
             }
         }
 
@@ -613,7 +613,7 @@ pub const App = struct {
         PerGroup_MergeSmall,
         Random,
     };
-    fn createLessons(self: *Self, splitStrategy: SplitStrategy) ![]mdl.Lesson {
+    fn createLessons(self: *Self, split_strategy: SplitStrategy) ![]mdl.Lesson {
         // Split the Courses into single Lessons, making sure they do not exceed the classroom_capacity
         var single_lessons = std.ArrayList(mdl.Lesson).init(self.a);
         defer single_lessons.deinit();
@@ -626,7 +626,7 @@ pub const App = struct {
                     // Empty Course
                     continue;
 
-                switch (splitStrategy) {
+                switch (split_strategy) {
                     SplitStrategy.OneSection => {
                         // Create only a single Lesson per Course
                         var students: usize = 0;

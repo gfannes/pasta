@@ -23,12 +23,12 @@ pub fn main() !void {
         return;
     }
 
-    var myApp = app.App.init(a, &log);
-    defer myApp.deinit();
+    var my_app = app.App.init(a, &log);
+    defer my_app.deinit();
 
-    try myApp.setup(config);
+    try my_app.setup(config);
 
-    try myApp.learn();
+    try my_app.learn();
 
-    try myApp.writeOutput();
+    try my_app.writeOutput();
 }
