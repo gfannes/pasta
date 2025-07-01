@@ -26,8 +26,38 @@ pub const Solution = struct {
 
     schedule: mdl.Schedule,
     unfit: usize,
+    entropy: f64 = 0.0,
+
     pub fn deinit(self: *Self) void {
         self.schedule.deinit();
+    }
+    pub fn copy(self: Self) !Self {
+        return Self{ .schedule = try self.schedule.copy(), .unfit = self.unfit, .entropy = self.entropy };
+    }
+
+    fn isBetterThan(self: Self, other: Self) bool {
+        return self.unfit < other.unfit or (self.unfit == other.unfit and self.entropy > other.entropy);
+    }
+
+    fn computeEntropy(self: *Self) void {
+        var total: usize = 0;
+        for (self.schedule.hour__class__lesson) |class__lesson| {
+            for (class__lesson) |maybe_lesson| {
+                if (maybe_lesson) |lesson| {
+                    total += lesson.students;
+                }
+            }
+        }
+
+        self.entropy = 0.0;
+        for (self.schedule.hour__class__lesson) |class__lesson| {
+            for (class__lesson) |maybe_lesson| {
+                if (maybe_lesson) |lesson| {
+                    const prob: f64 = @as(f64, @floatFromInt(lesson.students)) / @as(f64, @floatFromInt(total));
+                    self.entropy += -prob * @log(prob);
+                }
+            }
+        }
     }
 };
 
@@ -86,6 +116,10 @@ pub const App = struct {
         self.count = try deriveCounts(self.lesson_table, self.log);
         try self.model.alloc(self.count);
         try self.loadData();
+
+        if (self.output_dir) |output_dir| {
+            try std.fs.cwd().makePath(output_dir);
+        }
     }
 
     pub fn learn(self: *Self) !void {
@@ -97,16 +131,16 @@ pub const App = struct {
             a: std.mem.Allocator,
             log: *const rubr.log.Log,
             iterations: usize,
-            best_unfit: *usize,
+            maybe_global_best_solution: *?Solution,
             mutex: *std.Thread.Mutex,
 
-            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, best_unfit: *usize, mutex: *std.Thread.Mutex) void {
+            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, global_best_solution: *?Solution, mutex: *std.Thread.Mutex) void {
                 my.app = app;
                 my.regen = regen;
                 my.a = app.a;
                 my.log = app.log;
                 my.iterations = iterations;
-                my.best_unfit = best_unfit;
+                my.maybe_global_best_solution = global_best_solution;
                 my.mutex = mutex;
             }
             pub fn deinit(my: *My) void {
@@ -116,7 +150,7 @@ pub const App = struct {
                 my.call_() catch {};
             }
             fn call_(my: *My) !void {
-                var maybe_best_solution: ?Solution = null;
+                var maybe_local_best_solution: ?Solution = null;
 
                 for (0..my.iterations) |iteration| {
                     if (my.log.level(2)) |w|
@@ -130,50 +164,60 @@ pub const App = struct {
 
                     var maybe_solution = my.app.fit(lessons, max_step_factor) catch null;
                     if (maybe_solution) |*solution| {
-                        if (maybe_best_solution) |*best_solution| {
+                        solution.computeEntropy();
+                        if (maybe_local_best_solution) |*local_best_solution| {
                             defer solution.deinit();
-                            if (solution.unfit <= best_solution.unfit) {
-                                std.mem.swap(Solution, solution, best_solution);
+                            if (solution.isBetterThan(local_best_solution.*)) {
+                                std.mem.swap(Solution, solution, local_best_solution);
 
                                 if (my.log.level(1)) |w|
-                                    try w.print("Found better solution in regen {} iteration {}: unfit {}\n", .{ my.regen, iteration, best_solution.unfit });
+                                    try w.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
 
                                 my.mutex.lock();
                                 defer my.mutex.unlock();
-                                if (best_solution.unfit <= my.best_unfit.*) {
-                                    my.best_unfit.* = best_solution.unfit;
-                                    try best_solution.schedule.write(my.log.writer(), my.app.model, .{});
-                                    try my.log.print("Found better solution in regen {} iteration {}: unfit {}\n\n", .{ my.regen, iteration, my.best_unfit.* });
+                                if (my.maybe_global_best_solution.*) |*global_best_solution| {
+                                    if (local_best_solution.isBetterThan(global_best_solution.*)) {
+                                        global_best_solution.deinit();
+                                        my.maybe_global_best_solution.* = try local_best_solution.copy();
+                                        try local_best_solution.schedule.write(my.log.writer(), my.app.model, .{});
+                                        try my.log.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                        try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
+                                    }
+                                } else {
+                                    my.maybe_global_best_solution.* = try local_best_solution.copy();
+                                    try local_best_solution.schedule.write(my.log.writer(), my.app.model, .{});
+                                    try my.log.print("First solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                    try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
                                 }
                             }
                         } else {
-                            maybe_best_solution = solution.*;
+                            maybe_local_best_solution = solution.*;
                         }
                     }
 
-                    var best_solution = &(maybe_best_solution orelse unreachable);
+                    var local_best_solution = &(maybe_local_best_solution orelse unreachable);
                     var low_performer: bool = undefined;
                     low_performer = false;
-                    if (iteration >= 100 and best_solution.unfit > 20)
+                    if (iteration >= 100 and local_best_solution.unfit > 20)
                         low_performer = true;
-                    if (iteration >= 500 and best_solution.unfit > 8)
+                    if (iteration >= 500 and local_best_solution.unfit > 8)
                         low_performer = true;
                     if (low_performer) {
                         if (my.log.level(1)) |w|
-                            try w.print("Regen {} is a low performer: unfit {} at iteration {}\n", .{ my.regen, best_solution.unfit, iteration });
+                            try w.print("Regen {} is a low performer: unfit {} at iteration {}\n", .{ my.regen, local_best_solution.unfit, iteration });
                         if (false) {
-                            best_solution.deinit();
-                            maybe_best_solution = null;
+                            local_best_solution.deinit();
+                            maybe_local_best_solution = null;
                         }
                         break;
                     }
                 }
 
-                if (maybe_best_solution) |best_solution| {
+                if (maybe_local_best_solution) |local_best_solution| {
                     my.mutex.lock();
                     defer my.mutex.unlock();
-                    try my.app.solutions.append(best_solution);
-                    maybe_best_solution = null;
+                    try my.app.solutions.append(local_best_solution);
+                    maybe_local_best_solution = null;
                 }
 
                 const a = my.a;
@@ -186,7 +230,7 @@ pub const App = struct {
             return Error.RegenCountTooLow;
         if (self.iterations <= 0)
             return Error.IterationsTooLow;
-        var best_unfit: usize = std.math.maxInt(usize);
+        var best_solution: ?Solution = null;
         std.debug.print("Regen count: {},  iterations per regen {}\n", .{ self.regen_count, self.iterations });
         var mutex = std.Thread.Mutex{};
 
@@ -196,26 +240,23 @@ pub const App = struct {
         for (0..self.regen_count) |regen| {
             // Cb.call will deinit/destroy itself
             const cb = try self.a.create(Cb);
-            cb.init(self, regen, self.iterations, &best_unfit, &mutex);
+            cb.init(self, regen, self.iterations, &best_solution, &mutex);
             try thread_pool.spawn(Cb.call, .{cb});
         }
     }
 
     pub fn writeOutput(self: *Self) !void {
-        std.debug.print("App.writeOutput() {}\n", .{self.solutions.items.len});
-
         const Fn = struct {
             pub fn ascending(_: void, x: Solution, y: Solution) bool {
-                return x.unfit < y.unfit;
+                return x.isBetterThan(y);
             }
             pub fn descending(_: void, x: Solution, y: Solution) bool {
-                return y.unfit < x.unfit;
+                return y.isBetterThan(x);
             }
         };
 
-        if (self.output_dir) |output_dir| {
+        if (self.output_dir) |_| {
             std.sort.block(Solution, self.solutions.items, {}, Fn.ascending);
-            try std.fs.cwd().makePath(output_dir);
         } else {
             std.sort.block(Solution, self.solutions.items, {}, Fn.descending);
         }
@@ -226,22 +267,27 @@ pub const App = struct {
                 // Enough output
                 break;
 
-            var output_log = rubr.log.Log{};
-            output_log.init();
-            defer output_log.deinit();
-
-            var write_config: mdl.Schedule.WriteConfig = .{};
-            if (self.output_dir) |output_dir| {
-                const fp = try std.fmt.allocPrint(self.a, "{s}/solution-{:02}.csv", .{ output_dir, ix });
-                defer self.a.free(fp);
-
-                try output_log.toFile(fp);
-                write_config.mode = mdl.Schedule.WriteMode.Csv;
-            }
-
-            try output_log.print("Unfit,{}\n", .{solution.unfit});
-            try solution.schedule.write(output_log.writer(), self.model, write_config);
+            try self.writeSolution(solution, "solution-{:02}.csv", .{ix});
         }
+    }
+
+    // Pass all required arguments necessary for string interpolation of filename via args
+    fn writeSolution(self: Self, solution: Solution, comptime filename: []const u8, args: anytype) !void {
+        var output_log = rubr.log.Log{};
+        output_log.init();
+        defer output_log.deinit();
+
+        var write_config: mdl.Schedule.WriteConfig = .{};
+        if (self.output_dir) |output_dir| {
+            const fp = try std.fmt.allocPrint(self.a, "{s}/" ++ filename, .{output_dir} ++ args);
+            defer self.a.free(fp);
+
+            try output_log.toFile(fp);
+            write_config.mode = mdl.Schedule.WriteMode.Csv;
+        }
+
+        try output_log.print("Unfit,{},Entropy,{}\n", .{ solution.unfit, solution.entropy });
+        try solution.schedule.write(output_log.writer(), self.model, write_config);
     }
 
     pub fn fit(self: *Self, all_lessons: []mdl.Lesson, max_step_factor: usize) !?Solution {
