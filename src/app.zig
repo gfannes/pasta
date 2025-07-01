@@ -778,7 +778,7 @@ pub const App = struct {
                             var maybe_lesson: ?mdl.Lesson = null;
                             for (class_ixs, 0..) |class_ix, ix| {
                                 if (maybe_lesson) |*lesson| {
-                                    if (true) {
+                                    if (false) {
                                         // &algo Find class that still fits for this lesson
                                         var maybe_ix: ?usize = null;
                                         for (ix..class_ixs.len) |i| {
