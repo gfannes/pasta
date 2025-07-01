@@ -161,8 +161,10 @@ pub const App = struct {
                     if (low_performer) {
                         if (my.log.level(1)) |w|
                             try w.print("Regen {} is a low performer: unfit {} at iteration {}\n", .{ my.regen, best_solution.unfit, iteration });
-                        best_solution.deinit();
-                        maybe_best_solution = null;
+                        if (false) {
+                            best_solution.deinit();
+                            maybe_best_solution = null;
+                        }
                         break;
                     }
                 }
@@ -413,27 +415,31 @@ pub const App = struct {
             const course = lesson.course.cptr(self.model.courses);
 
             var tested_empty_hour: bool = false;
-            for (0..self.hours_per_week) |hour| {
-                if (schedule.isEmpty(hour)) {
-                    if (tested_empty_hour)
+            const ary = [_]bool{ true, false }; // &algo First try to fit in empty Hours. This has more probability to find a fit but uses more Hours in the Schedule.
+            // const ary = [_]bool{ false }; // &algo Try to fit in existing Hours immediately
+            for (ary) |only_empty| {
+                for (0..self.hours_per_week) |hour| {
+                    if (schedule.isEmpty(hour)) {
+                        if (tested_empty_hour)
+                            continue;
+                        tested_empty_hour = true;
+                    } else if (only_empty or !schedule.isFree(hour, lesson)) {
                         continue;
-                    tested_empty_hour = true;
-                } else if (!schedule.isFree(hour, lesson)) {
-                    continue;
+                    }
+
+                    schedule.updateLesson(hour, lesson, true);
+                    if (self.log.level(1)) |w| {
+                        try w.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, lesson.section, lesson.hour, hour });
+                        try schedule.write(w, self.model, .{});
+                    }
+
+                    if (try self.fit_(lessons[1..], schedule, fit_data))
+                        return true;
+
+                    if (self.log.level(1)) |w|
+                        try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
+                    schedule.updateLesson(hour, lesson, false);
                 }
-
-                schedule.updateLesson(hour, lesson, true);
-                if (self.log.level(1)) |w| {
-                    try w.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, lesson.section, lesson.hour, hour });
-                    try schedule.write(w, self.model, .{});
-                }
-
-                if (try self.fit_(lessons[1..], schedule, fit_data))
-                    return true;
-
-                if (self.log.level(1)) |w|
-                    try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
-                schedule.updateLesson(hour, lesson, false);
             }
         }
 
@@ -724,20 +730,43 @@ pub const App = struct {
 
                             // Add Classes to Lessons until their size is in [min_students, max_students]
                             var maybe_lesson: ?mdl.Lesson = null;
-                            for (class_ixs) |class_ix| {
-                                const class = class_ix.cptr(self.model.classes);
-
+                            for (class_ixs, 0..) |class_ix, ix| {
                                 if (maybe_lesson) |*lesson| {
-                                    if (lesson.students + class.count <= self.max_students) {
-                                        lesson.students += class.count;
-                                        lesson.classes.add(class_ix.ix);
+                                    if (true) {
+                                        // &algo Find class that still fits for this lesson
+                                        var maybe_ix: ?usize = null;
+                                        for (ix..class_ixs.len) |i| {
+                                            const class = class_ixs[i].cptr(self.model.classes);
+                                            if (lesson.students + class.count <= self.max_students) {
+                                                maybe_ix = i;
+                                                break;
+                                            }
+                                        }
+
+                                        if (maybe_ix) |i| {
+                                            const class = class_ixs[i].cptr(self.model.classes);
+                                            lesson.students += class.count;
+                                            lesson.classes.add(class_ixs[i].ix);
+                                        } else {
+                                            try single_lessons.append(lesson.*);
+                                            maybe_lesson = null;
+                                        }
                                     } else {
-                                        try single_lessons.append(lesson.*);
-                                        maybe_lesson = null;
+                                        // &algo Check if next class fits, if not, close the Lesson
+                                        // This might lead to extra Lessons
+                                        const class = class_ix.cptr(self.model.classes);
+                                        if (lesson.students + class.count <= self.max_students) {
+                                            lesson.students += class.count;
+                                            lesson.classes.add(class_ix.ix);
+                                        } else {
+                                            try single_lessons.append(lesson.*);
+                                            maybe_lesson = null;
+                                        }
                                     }
                                 }
 
                                 if (maybe_lesson == null) {
+                                    const class = class_ix.cptr(self.model.classes);
                                     maybe_lesson = mdl.Lesson{
                                         .course = mdl.Course.Ix.init(course_ix),
                                         .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
