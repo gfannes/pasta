@@ -242,6 +242,47 @@ pub const Schedule = struct {
                 }
             }
         }
+
+        var lessons = std.ArrayList(Lesson).init(self.a);
+        for (self.hour__class__lesson) |class__lesson| {
+            for (class__lesson) |maybe_lesson| {
+                if (maybe_lesson) |lesson| {
+                    if (lesson.hour == 0) {
+                        var has_lesson: bool = false;
+                        for (lessons.items) |l| {
+                            if (l.course.eql(lesson.course) and l.section == lesson.section) {
+                                has_lesson = true;
+                                break;
+                            }
+                        }
+                        if (!has_lesson)
+                            try lessons.append(lesson);
+                    }
+                }
+            }
+        }
+
+        const Fn = struct {
+            pub fn cmp(_: void, a: Lesson, b: Lesson) bool {
+                if (a.course.eql(b.course))
+                    return a.section < b.section;
+                return a.course.ix < b.course.ix;
+            }
+        };
+        std.sort.block(Lesson, lessons.items, {}, Fn.cmp);
+
+        for (lessons.items) |lesson| {
+            var line = try Line.init(self.a, max_width, writer, write_config.mode orelse WriteMode.Table);
+            defer line.deinit();
+
+            const course = lesson.course.cptr(model.courses);
+            line.print("{s}-{}", .{ course.name, lesson.section });
+            line.print("{}", .{lesson.students});
+            var it = lesson.classes.iterator();
+            while (it.next()) |class_ix| {
+                line.print("{s}", .{class_ix.cptr(model.classes).name});
+            }
+        }
     }
 };
 

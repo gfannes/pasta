@@ -142,8 +142,8 @@ pub const App = struct {
                                 defer my.mutex.unlock();
                                 if (best_solution.unfit <= my.best_unfit.*) {
                                     my.best_unfit.* = best_solution.unfit;
-                                    try my.log.print("\nFound better solution in regen {} iteration {}: unfit {}\n", .{ my.regen, iteration, my.best_unfit.* });
                                     try best_solution.schedule.write(my.log.writer(), my.app.model, .{});
+                                    try my.log.print("Found better solution in regen {} iteration {}: unfit {}\n\n", .{ my.regen, iteration, my.best_unfit.* });
                                 }
                             }
                         } else {
@@ -156,7 +156,7 @@ pub const App = struct {
                     low_performer = false;
                     if (iteration >= 100 and best_solution.unfit > 20)
                         low_performer = true;
-                    if (iteration >= 500 and best_solution.unfit > 5)
+                    if (iteration >= 500 and best_solution.unfit > 8)
                         low_performer = true;
                     if (low_performer) {
                         if (my.log.level(1)) |w|
@@ -200,6 +200,8 @@ pub const App = struct {
     }
 
     pub fn writeOutput(self: *Self) !void {
+        std.debug.print("App.writeOutput() {}\n", .{self.solutions.items.len});
+
         const Fn = struct {
             pub fn ascending(_: void, x: Solution, y: Solution) bool {
                 return x.unfit < y.unfit;
@@ -217,6 +219,7 @@ pub const App = struct {
         }
 
         for (self.solutions.items, 0..) |solution, ix| {
+            std.debug.print("Printing solution {}\n", .{ix});
             if (ix >= 10)
                 // Enough output
                 break;

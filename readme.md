@@ -62,10 +62,11 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 	- [x] Compute each regen in a different thread using std.Thread.Pool
 - [x] Fill Classes to fit in [min_students, max_students]
 	- Stop as soon as min_students is reached, otherwise, small Classes tend to block
+		- [ ] Look for additional class that fits
 	- A Course that fits in a single Lesson should not be split
-- [*] Write-out Schedules in output folder immediately when unfit==0
-	- [*] Include split of Course into Lessons
-- [ ] Produce Schedule that uses more Hours
+- [ ] Write-out Schedules in output folder immediately when unfit==0
+	- [x] Include split of Course into Lessons
+- [*] Produce Schedule that uses more Hours
 - [ ] Take Constraints into account
 - [ ] Test on Windows
 
