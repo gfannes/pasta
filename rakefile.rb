@@ -19,6 +19,12 @@ task :install do
     sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir}")
 end
 
+desc 'Learn'
+task :learn => :install do
+    sh("pasta -i 5de-jaar.csv -o 5de-jaar -r 1000")
+    sh("pasta -i 6de-jaar.csv -o 6de-jaar -r 1000")
+end
+
 desc('Clean')
 task :clean do
     FileUtils.rm_rf('target')

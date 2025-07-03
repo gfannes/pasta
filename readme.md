@@ -62,7 +62,17 @@ https://docs.google.com/spreadsheets/d/1hcm2h3C2WepMt0xYYwRzCC1oJmZjo3IkqQ8WPOhv
 	- [x] Compute each regen in a different thread using std.Thread.Pool
 - [x] Fill Classes to fit in [min_students, max_students]
 	- Stop as soon as min_students is reached, otherwise, small Classes tend to block
-		- [x] Look for additional class that fits, see &algo
+		- [/] Look for additional class that fits, see &algo
+			- [ ] Make this configurable from CLI, expanding on SplitStrategy
+			- [ ] Add additional random SplitStrategy based on probabilistic partitioning and softmax
+				- Shuffle items
+				- For each item
+					- Compute a score for each bin. Bins closer to being full get lower scores.
+					- Turn those scores into probabilities using softmax or similar, potentially with some temperature:
+						- Low: use higher probs for smallre bins
+						- High: use uniform distribution
+					- Randomly choose a bin using those probabilities.
+					- Skip bins where the item would exceed the max weight.
 	- A Course that fits in a single Lesson should not be split
 - [x] Write-out Schedules in output folder immediately when unfit==0
 	- Written to output/best-solution.csv
