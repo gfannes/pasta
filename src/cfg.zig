@@ -74,7 +74,7 @@ pub const Config = struct {
         }
     }
 
-    pub fn print(self: Self, w: rubr.log.Log.Writer) !void {
+    pub fn print(self: Self, w: *std.Io.Writer) !void {
         try w.print("Help for {s}\n", .{self.exe_name orelse "<unknown>"});
         try w.print("    -h/--help               Print this help\n", .{});
         try w.print("    -v/--verbose LEVEL      Verbosity level [optional, default is 0]\n", .{});

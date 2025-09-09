@@ -1,6 +1,6 @@
 require('fileutils')
 
-here_dir = File.dirname(__FILE__)
+File.dirname(__FILE__)
 gubg_dir = ENV['gubg']
 gubg_bin_dir = File.join(gubg_dir, 'bin')
 
@@ -10,19 +10,19 @@ end
 
 desc 'Install'
 task :install do
-    mode = :safe
     mode = :fast
     # mode = :debug
 
-    m = {safe: :safe, fast: :fast}[mode]
+    m = { safe: :safe, fast: :fast }[mode]
     mode_str = m ? "--release=#{m}" : ''
-    sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir}")
+    sh("clear")
+    sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir} -freference-trace=10")
 end
 
 desc 'Learn'
-task :learn => :install do
-    sh("pasta -i 5de-jaar.csv -o 5de-jaar -r 1000")
-    sh("pasta -i 6de-jaar.csv -o 6de-jaar -r 1000")
+task learn: :install do
+    sh('pasta -i 5de-jaar.csv -o 5de-jaar -r 1000')
+    sh('pasta -i 6de-jaar.csv -o 6de-jaar -r 1000')
 end
 
 desc('Clean')

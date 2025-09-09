@@ -78,7 +78,7 @@ pub const App = struct {
     count: mdl.Count = .{},
     model: mdl.Model,
     prng: std.Random.DefaultPrng,
-    solutions: Solutions,
+    solutions: Solutions = .{},
 
     pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log) Self {
         return Self{
@@ -88,7 +88,6 @@ pub const App = struct {
             .lesson_table = csv.Table.init(a),
             .model = mdl.Model.init(a),
             .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
-            .solutions = Solutions.init(a),
         };
     }
     pub fn deinit(self: *Self) void {
@@ -96,7 +95,7 @@ pub const App = struct {
         self.model.deinit();
         for (self.solutions.items) |*solution|
             solution.deinit();
-        self.solutions.deinit();
+        self.solutions.deinit(self.a);
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
@@ -216,7 +215,7 @@ pub const App = struct {
                 if (maybe_local_best_solution) |local_best_solution| {
                     my.mutex.lock();
                     defer my.mutex.unlock();
-                    try my.app.solutions.append(local_best_solution);
+                    try my.app.solutions.append(my.a, local_best_solution);
                     maybe_local_best_solution = null;
                 }
 
@@ -671,8 +670,8 @@ pub const App = struct {
     };
     fn createLessons(self: *Self, split_strategy: SplitStrategy) ![]mdl.Lesson {
         // Split the Courses into single Lessons, making sure they do not exceed the classroom_capacity
-        var single_lessons = std.ArrayList(mdl.Lesson).init(self.a);
-        defer single_lessons.deinit();
+        var single_lessons = std.ArrayList(mdl.Lesson){};
+        defer single_lessons.deinit(self.a);
         {
             for (self.model.courses, 0..) |*course, course_ix| {
                 if (course.classes.mask == 0)
@@ -691,7 +690,7 @@ pub const App = struct {
                             const class = class_ix.cptr(self.model.classes);
                             students += class.count;
                         }
-                        try single_lessons.append(mdl.Lesson{
+                        try single_lessons.append(self.a, mdl.Lesson{
                             .course = mdl.Course.Ix.init(course_ix),
                             .classes = course.classes,
                             .students = students,
@@ -712,7 +711,7 @@ pub const App = struct {
                                     students += class.count;
                                 }
 
-                                try single_lessons.append(mdl.Lesson{
+                                try single_lessons.append(self.a, mdl.Lesson{
                                     .course = mdl.Course.Ix.init(course_ix),
                                     .classes = classes,
                                     .students = students,
@@ -740,7 +739,7 @@ pub const App = struct {
                             large.students += small.students;
                             large.classes.mask |= small.classes.mask;
 
-                            try single_lessons.resize(single_lessons.items.len - 1);
+                            try single_lessons.resize(self.a, single_lessons.items.len - 1);
 
                             if (large.students >= self.min_students)
                                 break;
@@ -764,7 +763,7 @@ pub const App = struct {
                         if (students <= self.max_students) {
                             // All students fit in a single Lesson: do not shuffle and split
                             // Especially because the check against min_students might result in more than 1 Lesson
-                            try single_lessons.append(mdl.Lesson{
+                            try single_lessons.append(self.a, mdl.Lesson{
                                 .course = mdl.Course.Ix.init(course_ix),
                                 .classes = course.classes,
                                 .students = students,
@@ -794,7 +793,7 @@ pub const App = struct {
                                             lesson.students += class.count;
                                             lesson.classes.add(class_ixs[i].ix);
                                         } else {
-                                            try single_lessons.append(lesson.*);
+                                            try single_lessons.append(self.a, lesson.*);
                                             maybe_lesson = null;
                                         }
                                     } else {
@@ -805,7 +804,7 @@ pub const App = struct {
                                             lesson.students += class.count;
                                             lesson.classes.add(class_ix.ix);
                                         } else {
-                                            try single_lessons.append(lesson.*);
+                                            try single_lessons.append(self.a, lesson.*);
                                             maybe_lesson = null;
                                         }
                                     }
@@ -823,13 +822,13 @@ pub const App = struct {
                                 if (maybe_lesson) |lesson| {
                                     if (lesson.students >= self.min_students) {
                                         // This Lesson is full enough. If we try to fill it to max_students, small Classes end-up blocking the search.
-                                        try single_lessons.append(lesson);
+                                        try single_lessons.append(self.a, lesson);
                                         maybe_lesson = null;
                                     }
                                 }
                             }
                             if (maybe_lesson) |lesson|
-                                try single_lessons.append(lesson);
+                                try single_lessons.append(self.a, lesson);
                         }
                     },
                 }

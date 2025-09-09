@@ -165,7 +165,7 @@ pub const Schedule = struct {
     pub const WriteConfig = struct {
         mode: ?WriteMode = null,
     };
-    pub fn write(self: Self, writer: rubr.log.Log.Writer, model: Model, write_config: WriteConfig) !void {
+    pub fn write(self: Self, writer: *std.Io.Writer, model: Model, write_config: WriteConfig) !void {
         var max_width: usize = 0;
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
@@ -181,11 +181,11 @@ pub const Schedule = struct {
             const My = @This();
             a: std.mem.Allocator,
             width: usize,
-            w: rubr.log.Log.Writer,
+            w: *std.Io.Writer,
             buf: []u8 = &.{},
             write_mode: WriteMode,
             sep: []const u8 = "",
-            fn init(a: std.mem.Allocator, width: usize, w: rubr.log.Log.Writer, write_mode: WriteMode) !My {
+            fn init(a: std.mem.Allocator, width: usize, w: *std.Io.Writer, write_mode: WriteMode) !My {
                 if (write_mode == WriteMode.Table)
                     try w.print("|", .{});
                 return My{ .a = a, .width = width, .w = w, .buf = try a.alloc(u8, width), .write_mode = write_mode };
@@ -243,7 +243,7 @@ pub const Schedule = struct {
             }
         }
 
-        var lessons = std.ArrayList(Lesson).init(self.a);
+        var lessons = std.ArrayList(Lesson){};
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
                 if (maybe_lesson) |lesson| {
@@ -256,7 +256,7 @@ pub const Schedule = struct {
                             }
                         }
                         if (!has_lesson)
-                            try lessons.append(lesson);
+                            try lessons.append(self.a, lesson);
                     }
                 }
             }
