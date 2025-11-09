@@ -10,7 +10,7 @@ pub fn main() !void {
 
     const env = env_inst.env();
 
-    var config = cfg.Config.init(env.a);
+    var config = cfg.Config.init(env);
     defer config.deinit();
     try config.parse();
 

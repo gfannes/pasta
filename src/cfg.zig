@@ -1,5 +1,6 @@
 const std = @import("std");
 const rubr = @import("rubr.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     CouldNotFindExecutable,
@@ -20,7 +21,6 @@ const Default = struct {
 pub const Config = struct {
     const Self = @This();
 
-    a: std.mem.Allocator,
     args: rubr.cli.Args,
 
     exe_name: ?[]const u8 = null,
@@ -37,12 +37,10 @@ pub const Config = struct {
     min_students: usize = Default.min_students,
     max_students: usize = Default.max_students,
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a, .args = rubr.cli.Args.init(a) };
+    pub fn init(env: Env) Self {
+        return Self{ .args = rubr.cli.Args{ .env = env } };
     }
-    pub fn deinit(self: *Self) void {
-        self.args.deinit();
-    }
+    pub fn deinit(_: *Self) void {}
 
     pub fn parse(self: *Self) !void {
         try self.args.setupFromOS();
