@@ -65,8 +65,7 @@ pub const App = struct {
     const Self = @This();
     const Solutions = std.ArrayList(Solution);
 
-    a: std.mem.Allocator,
-    log: *const rubr.log.Log,
+    env: rubr.Env,
     hours_per_week: usize = 0,
     max_students: usize = 0,
     min_students: usize = 0,
@@ -80,14 +79,13 @@ pub const App = struct {
     prng: std.Random.DefaultPrng,
     solutions: Solutions = .{},
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log) Self {
+    pub fn init(env: rubr.Env) Self {
         return Self{
-            .a = a,
-            .log = log,
+            .env = env,
             .hours_per_week = 32,
-            .lesson_table = csv.Table.init(a),
-            .model = mdl.Model.init(a),
-            .prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp())),
+            .lesson_table = csv.Table.init(env.a),
+            .model = mdl.Model.init(env.a),
+            .prng = std.Random.DefaultPrng.init(@intCast(env.duration_ns())),
         };
     }
     pub fn deinit(self: *Self) void {
@@ -95,7 +93,7 @@ pub const App = struct {
         self.model.deinit();
         for (self.solutions.items) |*solution|
             solution.deinit();
-        self.solutions.deinit(self.a);
+        self.solutions.deinit(self.env.a);
     }
 
     pub fn setup(self: *Self, config: cfg.Config) !void {
@@ -107,12 +105,12 @@ pub const App = struct {
         self.output_dir = config.output_dir;
 
         const input_fp = config.input_fp orelse {
-            try self.log.err("Please specify an input file\n", .{});
+            try self.env.log.err("Please specify an input file\n", .{});
             return Error.ExpectedInputFilepath;
         };
         try self.loadLessonTable(input_fp);
 
-        self.count = try deriveCounts(self.lesson_table, self.log);
+        self.count = try deriveCounts(self.lesson_table, self.env.log);
         try self.model.alloc(self.count);
         try self.loadData();
 
@@ -127,8 +125,7 @@ pub const App = struct {
 
             app: *Self,
             regen: usize,
-            a: std.mem.Allocator,
-            log: *const rubr.log.Log,
+            env: rubr.Env,
             iterations: usize,
             maybe_global_best_solution: *?Solution,
             mutex: *std.Thread.Mutex,
@@ -136,8 +133,7 @@ pub const App = struct {
             pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, global_best_solution: *?Solution, mutex: *std.Thread.Mutex) void {
                 my.app = app;
                 my.regen = regen;
-                my.a = app.a;
-                my.log = app.log;
+                my.env = app.env;
                 my.iterations = iterations;
                 my.maybe_global_best_solution = global_best_solution;
                 my.mutex = mutex;
@@ -152,11 +148,11 @@ pub const App = struct {
                 var maybe_local_best_solution: ?Solution = null;
 
                 for (0..my.iterations) |iteration| {
-                    if (my.log.level(2)) |w|
+                    if (my.env.log.level(2)) |w|
                         try w.print("Regen {}, iteration {}\n", .{ my.regen, iteration });
 
                     const lessons: []mdl.Lesson = try my.app.createLessons(SplitStrategy.Random);
-                    defer my.a.free(lessons);
+                    defer my.env.a.free(lessons);
 
                     // If we make it this far, let's dig a bit deeper
                     const max_step_factor: usize = if (iteration <= 500) 1 else 10;
@@ -169,7 +165,7 @@ pub const App = struct {
                             if (solution.isBetterThan(local_best_solution.*)) {
                                 std.mem.swap(Solution, solution, local_best_solution);
 
-                                if (my.log.level(1)) |w|
+                                if (my.env.log.level(1)) |w|
                                     try w.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
 
                                 my.mutex.lock();
@@ -178,14 +174,14 @@ pub const App = struct {
                                     if (local_best_solution.isBetterThan(global_best_solution.*)) {
                                         global_best_solution.deinit();
                                         my.maybe_global_best_solution.* = try local_best_solution.copy();
-                                        try local_best_solution.schedule.write(my.log.writer(), my.app.model, .{});
-                                        try my.log.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                        try local_best_solution.schedule.write(my.env.log.writer(), my.app.model, .{});
+                                        try my.env.log.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
                                         try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
                                     }
                                 } else {
                                     my.maybe_global_best_solution.* = try local_best_solution.copy();
-                                    try local_best_solution.schedule.write(my.log.writer(), my.app.model, .{});
-                                    try my.log.print("First solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                    try local_best_solution.schedule.write(my.env.log.writer(), my.app.model, .{});
+                                    try my.env.log.print("First solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
                                     try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
                                 }
                             }
@@ -202,7 +198,7 @@ pub const App = struct {
                     if (iteration >= 500 and local_best_solution.unfit > 8)
                         low_performer = true;
                     if (low_performer) {
-                        if (my.log.level(1)) |w|
+                        if (my.env.log.level(1)) |w|
                             try w.print("Regen {} is a low performer: unfit {} at iteration {}\n", .{ my.regen, local_best_solution.unfit, iteration });
                         if (false) {
                             local_best_solution.deinit();
@@ -215,11 +211,11 @@ pub const App = struct {
                 if (maybe_local_best_solution) |local_best_solution| {
                     my.mutex.lock();
                     defer my.mutex.unlock();
-                    try my.app.solutions.append(my.a, local_best_solution);
+                    try my.app.solutions.append(my.env.a, local_best_solution);
                     maybe_local_best_solution = null;
                 }
 
-                const a = my.a;
+                const a = my.env.a;
                 my.deinit();
                 a.destroy(my);
             }
@@ -234,11 +230,11 @@ pub const App = struct {
         var mutex = std.Thread.Mutex{};
 
         var thread_pool: std.Thread.Pool = undefined;
-        try thread_pool.init(.{ .allocator = self.a, .n_jobs = 32 });
+        try thread_pool.init(.{ .allocator = self.env.a, .n_jobs = 32 });
         defer thread_pool.deinit();
         for (0..self.regen_count) |regen| {
             // Cb.call will deinit/destroy itself
-            const cb = try self.a.create(Cb);
+            const cb = try self.env.a.create(Cb);
             cb.init(self, regen, self.iterations, &best_solution, &mutex);
             try thread_pool.spawn(Cb.call, .{cb});
         }
@@ -272,16 +268,16 @@ pub const App = struct {
 
     // Pass all required arguments necessary for string interpolation of filename via args
     fn writeSolution(self: Self, solution: Solution, comptime filename: []const u8, args: anytype) !void {
-        var output_log = rubr.log.Log{};
+        var output_log = rubr.Log{};
         output_log.init();
         defer output_log.deinit();
 
         var write_config: mdl.Schedule.WriteConfig = .{};
         if (self.output_dir) |output_dir| {
-            const fp = try std.fmt.allocPrint(self.a, "{s}/" ++ filename, .{output_dir} ++ args);
-            defer self.a.free(fp);
+            const fp = try std.fmt.allocPrint(self.env.a, "{s}/" ++ filename, .{output_dir} ++ args);
+            defer self.env.a.free(fp);
 
-            try output_log.toFile(fp);
+            try output_log.toFile(fp, .{});
             write_config.mode = mdl.Schedule.WriteMode.Csv;
         }
 
@@ -290,12 +286,12 @@ pub const App = struct {
     }
 
     pub fn fit(self: *Self, all_lessons: []mdl.Lesson, max_step_factor: usize) !?Solution {
-        var schedule = mdl.Schedule.init(self.a);
+        var schedule = mdl.Schedule.init(self.env.a);
         defer schedule.deinit();
         try schedule.alloc(self.hours_per_week, self.count.classes);
 
         const lessons_to_fit = self.deriveLessonsToFit(all_lessons);
-        if (self.log.level(1)) |w| {
+        if (self.env.log.level(1)) |w| {
             try w.print("Lessons to fit", .{});
             for (lessons_to_fit) |lesson| {
                 const course = lesson.course.cptr(self.model.courses);
@@ -312,17 +308,17 @@ pub const App = struct {
 
         if (self.fit_(lessons_to_fit, &schedule, &fit_data)) |ok| {
             if (ok) {
-                try self.log.info("Found solution!\n", .{});
+                try self.env.log.info("Found solution!\n", .{});
             } else {
-                // try self.log.info("Could not find solution\n", .{});
+                // try self.env.log.info("Could not find solution\n", .{});
             }
         } else |err| {
             switch (err) {
                 Error.Stop => {
-                    // try self.log.info("Stopping search\n", .{});
+                    // try self.env.log.info("Stopping search\n", .{});
                 },
                 else => {
-                    try self.log.err("Something went wrong during search: {}\n", .{err});
+                    try self.env.log.err("Something went wrong during search: {}\n", .{err});
                     return err;
                 },
             }
@@ -363,7 +359,7 @@ pub const App = struct {
     };
     fn fit_(self: Self, lessons: []mdl.Lesson, schedule: *mdl.Schedule, fit_data: *FitData) !bool {
         if (try fit_data.store(lessons.len, schedule.*)) {
-            if (self.log.level(1)) |w| {
+            if (self.env.log.level(1)) |w| {
                 try w.print("Found better fit, still {} Lessons not fitted\n", .{lessons.len});
                 for (lessons) |lesson| {
                     const course = lesson.course.cptr(self.model.courses);
@@ -390,7 +386,7 @@ pub const App = struct {
             // 1. Find Lesson that _fills the complete Gap_
             // 2. Find Lesson that _fills something from the Gap_
 
-            if (self.log.level(1)) |w| {
+            if (self.env.log.level(1)) |w| {
                 try w.print("{} Filling Gap for hour {} for", .{ lessons.len, gap.hour });
                 var it = gap.classes.iterator();
                 while (it.next()) |class_ix|
@@ -403,7 +399,7 @@ pub const App = struct {
                 Partial,
             };
             for (&[_]FillStrategy{ FillStrategy.Complete, FillStrategy.Partial }) |fill_strategy| {
-                if (self.log.level(1)) |w|
+                if (self.env.log.level(1)) |w|
                     try w.print("\t{any}\n", .{fill_strategy});
 
                 // Lessons that are already tested and could not be fit
@@ -415,7 +411,7 @@ pub const App = struct {
                     const course = lesson.course.cptr(self.model.courses);
 
                     if (section_mask & already_tested_mask != 0) {
-                        if (self.log.level(1)) |w|
+                        if (self.env.log.level(1)) |w|
                             try w.print("\tNo need to test {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
                         continue;
                     }
@@ -431,7 +427,7 @@ pub const App = struct {
                     };
                     if (section_fills_gap) {
                         schedule.updateLesson(gap.hour, lesson.*, true);
-                        if (self.log.level(1)) |w| {
+                        if (self.env.log.level(1)) |w| {
                             try w.print("\tFitted Lesson {s}-{}-{} for {}\n", .{ course.name, lesson.section, lesson.hour, gap.hour });
                             try schedule.write(w, self.model, .{});
                         }
@@ -444,13 +440,13 @@ pub const App = struct {
 
                         // Recursive fit_() failed: erase lesson and continue the search
                         std.mem.swap(mdl.Lesson, lesson, &lessons[0]);
-                        if (self.log.level(1)) |w|
+                        if (self.env.log.level(1)) |w|
                             try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
                         schedule.updateLesson(gap.hour, lesson.*, false);
                     }
                 }
             }
-            if (self.log.level(1)) |w| {
+            if (self.env.log.level(1)) |w| {
                 try w.print("\tCould not fill Gap\n", .{});
                 try schedule.write(w, self.model, .{});
             }
@@ -473,7 +469,7 @@ pub const App = struct {
                     }
 
                     schedule.updateLesson(hour, lesson, true);
-                    if (self.log.level(1)) |w| {
+                    if (self.env.log.level(1)) |w| {
                         try w.print("{} Placed Lesson {s}-{}-{} for hour {}\n", .{ lessons.len, course.name, lesson.section, lesson.hour, hour });
                         try schedule.write(w, self.model, .{});
                     }
@@ -481,7 +477,7 @@ pub const App = struct {
                     if (try self.fit_(lessons[1..], schedule, fit_data))
                         return true;
 
-                    if (self.log.level(1)) |w|
+                    if (self.env.log.level(1)) |w|
                         try w.print("\tRemoving {s}-{}-{}\n", .{ course.name, lesson.section, lesson.hour });
                     schedule.updateLesson(hour, lesson, false);
                 }
@@ -519,7 +515,7 @@ pub const App = struct {
         try self.lesson_table.loadFromFile(fp);
     }
 
-    fn deriveCounts(lesson_table: csv.Table, log: *const rubr.log.Log) !mdl.Count {
+    fn deriveCounts(lesson_table: csv.Table, log: *const rubr.Log) !mdl.Count {
         var count = mdl.Count{};
 
         for (lesson_table.rows[0][3..], 3..) |cell, ix| {
@@ -547,12 +543,12 @@ pub const App = struct {
 
     fn loadData(self: *Self) !void {
         if (self.count.classes > Max.classes) {
-            try self.log.err("You have {} classes while I can only handle {}\n", .{ self.count.classes, Max.classes });
+            try self.env.log.err("You have {} classes while I can only handle {}\n", .{ self.count.classes, Max.classes });
             return Error.TooManyClasses;
         }
 
-        var class__col = try self.a.alloc(usize, self.count.classes);
-        defer self.a.free(class__col);
+        var class__col = try self.env.a.alloc(usize, self.count.classes);
+        defer self.env.a.free(class__col);
         {
             var class_ix: usize = 0;
             for (self.lesson_table.rows[0][3..], 3..) |cell, col_ix| {
@@ -568,10 +564,10 @@ pub const App = struct {
             std.debug.assert(class_ix == self.count.classes);
         }
 
-        var group__row = try self.a.alloc(usize, self.count.groups);
-        defer self.a.free(group__row);
-        var course__row = try self.a.alloc(usize, self.count.courses);
-        defer self.a.free(course__row);
+        var group__row = try self.env.a.alloc(usize, self.count.groups);
+        defer self.env.a.free(group__row);
+        var course__row = try self.env.a.alloc(usize, self.count.courses);
+        defer self.env.a.free(course__row);
         {
             var group_ix: usize = 0;
             var course_ix: usize = 0;
@@ -595,7 +591,7 @@ pub const App = struct {
             if (self.lesson_table.rows[2][col_ix].int) |count| {
                 class.count = @intCast(count);
             } else {
-                try self.log.err("Could not find Class size for '{s}'\n", .{class.name});
+                try self.env.log.err("Could not find Class size for '{s}'\n", .{class.name});
                 return Error.FormatError;
             }
 
@@ -604,13 +600,13 @@ pub const App = struct {
                 if (self.lesson_table.rows[row_ix][col_ix].int) |int| {
                     if (int != 1 and int != 0) {
                         const course = &self.model.courses[course_ix];
-                        try self.log.err("Please use a '1' to indicate that Class '{s}' follows Course '{s}'\n", .{ class.name, course.name });
+                        try self.env.log.err("Please use a '1' to indicate that Class '{s}' follows Course '{s}'\n", .{ class.name, course.name });
                         return Error.FormatError;
                     }
                     course_count += @intCast(int);
                 }
             }
-            class.courses = try self.a.alloc(mdl.Course.Ix, course_count);
+            class.courses = try self.env.a.alloc(mdl.Course.Ix, course_count);
             class.courses.len = 0;
         }
 
@@ -624,7 +620,7 @@ pub const App = struct {
                 for (class__col, 0..) |col_ix, class_ix| {
                     if (row[col_ix].int) |int| {
                         if (int != 1) {
-                            try self.log.err("Please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
+                            try self.env.log.err("Please use '1' to indicate that a Class belongs to a Group, not '{s}'\n", .{row[col_ix].str});
                             return Error.FormatError;
                         }
                         group.classes.add(class_ix);
@@ -653,7 +649,7 @@ pub const App = struct {
                             },
                             else => {
                                 const class_name = self.lesson_table.rows[1][col_ix].str;
-                                try self.log.err("Please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
+                                try self.env.log.err("Please use '0/1' to indicate that Class '{s}' follows Course '{s}', not '{s}'\n", .{ class_name, course.name, row[col_ix].str });
                                 return Error.FormatError;
                             },
                         }
@@ -671,7 +667,7 @@ pub const App = struct {
     fn createLessons(self: *Self, split_strategy: SplitStrategy) ![]mdl.Lesson {
         // Split the Courses into single Lessons, making sure they do not exceed the classroom_capacity
         var single_lessons = std.ArrayList(mdl.Lesson){};
-        defer single_lessons.deinit(self.a);
+        defer single_lessons.deinit(self.env.a);
         {
             for (self.model.courses, 0..) |*course, course_ix| {
                 if (course.classes.mask == 0)
@@ -690,7 +686,7 @@ pub const App = struct {
                             const class = class_ix.cptr(self.model.classes);
                             students += class.count;
                         }
-                        try single_lessons.append(self.a, mdl.Lesson{
+                        try single_lessons.append(self.env.a, mdl.Lesson{
                             .course = mdl.Course.Ix.init(course_ix),
                             .classes = course.classes,
                             .students = students,
@@ -711,7 +707,7 @@ pub const App = struct {
                                     students += class.count;
                                 }
 
-                                try single_lessons.append(self.a, mdl.Lesson{
+                                try single_lessons.append(self.env.a, mdl.Lesson{
                                     .course = mdl.Course.Ix.init(course_ix),
                                     .classes = classes,
                                     .students = students,
@@ -739,7 +735,7 @@ pub const App = struct {
                             large.students += small.students;
                             large.classes.mask |= small.classes.mask;
 
-                            try single_lessons.resize(self.a, single_lessons.items.len - 1);
+                            try single_lessons.resize(self.env.a, single_lessons.items.len - 1);
 
                             if (large.students >= self.min_students)
                                 break;
@@ -763,7 +759,7 @@ pub const App = struct {
                         if (students <= self.max_students) {
                             // All students fit in a single Lesson: do not shuffle and split
                             // Especially because the check against min_students might result in more than 1 Lesson
-                            try single_lessons.append(self.a, mdl.Lesson{
+                            try single_lessons.append(self.env.a, mdl.Lesson{
                                 .course = mdl.Course.Ix.init(course_ix),
                                 .classes = course.classes,
                                 .students = students,
@@ -793,7 +789,7 @@ pub const App = struct {
                                             lesson.students += class.count;
                                             lesson.classes.add(class_ixs[i].ix);
                                         } else {
-                                            try single_lessons.append(self.a, lesson.*);
+                                            try single_lessons.append(self.env.a, lesson.*);
                                             maybe_lesson = null;
                                         }
                                     } else {
@@ -804,7 +800,7 @@ pub const App = struct {
                                             lesson.students += class.count;
                                             lesson.classes.add(class_ix.ix);
                                         } else {
-                                            try single_lessons.append(self.a, lesson.*);
+                                            try single_lessons.append(self.env.a, lesson.*);
                                             maybe_lesson = null;
                                         }
                                     }
@@ -822,13 +818,13 @@ pub const App = struct {
                                 if (maybe_lesson) |lesson| {
                                     if (lesson.students >= self.min_students) {
                                         // This Lesson is full enough. If we try to fill it to max_students, small Classes end-up blocking the search.
-                                        try single_lessons.append(self.a, lesson);
+                                        try single_lessons.append(self.env.a, lesson);
                                         maybe_lesson = null;
                                     }
                                 }
                             }
                             if (maybe_lesson) |lesson|
-                                try single_lessons.append(self.a, lesson);
+                                try single_lessons.append(self.env.a, lesson);
                         }
                     },
                 }
@@ -863,7 +859,7 @@ pub const App = struct {
         for (single_lessons.items) |lesson|
             lesson_count += lesson.course.cptr(self.model.courses).hours;
 
-        var lessons = try self.a.alloc(mdl.Lesson, lesson_count);
+        var lessons = try self.env.a.alloc(mdl.Lesson, lesson_count);
         lessons.len = 0;
         for (single_lessons.items) |single_lesson| {
             const course = single_lesson.course.cptr(self.model.courses);

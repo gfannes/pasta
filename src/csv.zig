@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub const Error = error{
+    CouldNotReadAllData,
+};
+
 pub const Table = struct {
     const Self = @This();
     const Dim = struct {
@@ -35,7 +39,15 @@ pub const Table = struct {
     fn readContent(self: *Self, fp: []const u8) !void {
         var file = try std.fs.cwd().openFile(fp, .{ .mode = .read_only });
         defer file.close();
-        self.content = try file.readToEndAlloc(self.a, std.math.maxInt(usize));
+
+        const stat = try file.stat();
+        const buf = try self.a.alloc(u8, stat.size);
+        errdefer self.a.free(buf);
+
+        if (try file.read(buf) != stat.size)
+            return Error.CouldNotReadAllData;
+
+        self.content = buf;
     }
     fn deriveNewline(self: *Self) void {
         self.newline = if (std.mem.indexOf(u8, self.content, "\r\n") != null) "\r\n" else "\n";

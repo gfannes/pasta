@@ -4,26 +4,24 @@ const rubr = @import("rubr.zig");
 const app = @import("app.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const a = gpa.allocator();
+    var env_inst = rubr.Env.Instance{};
+    env_inst.init();
+    defer env_inst.deinit();
 
-    var config = cfg.Config.init(a);
+    const env = env_inst.env();
+
+    var config = cfg.Config.init(env.a);
     defer config.deinit();
     try config.parse();
 
-    var log = rubr.log.Log{};
-    log.init();
-    defer log.deinit();
-
-    log.setLevel(config.verbose);
+    env_inst.log.setLevel(config.verbose);
 
     if (config.print_help) {
-        try config.print(log.writer());
+        try config.print(env.log.writer());
         return;
     }
 
-    var my_app = app.App.init(a, &log);
+    var my_app = app.App.init(env);
     defer my_app.deinit();
 
     try my_app.setup(config);
