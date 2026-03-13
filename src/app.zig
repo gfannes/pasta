@@ -77,13 +77,13 @@ pub const App = struct {
     count: mdl.Count = .{},
     model: mdl.Model,
     prng: std.Random.DefaultPrng,
-    solutions: Solutions = .{},
+    solutions: Solutions = .empty,
 
     pub fn init(env: rubr.Env) Self {
         return Self{
             .env = env,
             .hours_per_week = 32,
-            .lesson_table = csv.Table.init(env.a),
+            .lesson_table = csv.Table.init(env),
             .model = mdl.Model.init(env.a),
             .prng = std.Random.DefaultPrng.init(@intCast(env.duration_ns())),
         };
@@ -115,7 +115,7 @@ pub const App = struct {
         try self.loadData();
 
         if (self.output_dir) |output_dir| {
-            try std.fs.cwd().makePath(output_dir);
+            try std.Io.Dir.cwd().createDirPath(self.env.io, output_dir);
         }
     }
 
@@ -128,9 +128,9 @@ pub const App = struct {
             env: rubr.Env,
             iterations: usize,
             maybe_global_best_solution: *?Solution,
-            mutex: *std.Thread.Mutex,
+            mutex: *std.Io.Mutex,
 
-            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, global_best_solution: *?Solution, mutex: *std.Thread.Mutex) void {
+            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, global_best_solution: *?Solution, mutex: *std.Io.Mutex) void {
                 my.app = app;
                 my.regen = regen;
                 my.env = app.env;
@@ -168,8 +168,8 @@ pub const App = struct {
                                 if (my.env.log.level(1)) |w|
                                     try w.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
 
-                                my.mutex.lock();
-                                defer my.mutex.unlock();
+                                try my.mutex.lock(my.env.io);
+                                defer my.mutex.unlock(my.env.io);
                                 if (my.maybe_global_best_solution.*) |*global_best_solution| {
                                     if (local_best_solution.isBetterThan(global_best_solution.*)) {
                                         global_best_solution.deinit();
@@ -209,8 +209,8 @@ pub const App = struct {
                 }
 
                 if (maybe_local_best_solution) |local_best_solution| {
-                    my.mutex.lock();
-                    defer my.mutex.unlock();
+                    try my.mutex.lock(my.env.io);
+                    defer my.mutex.unlock(my.env.io);
                     try my.app.solutions.append(my.env.a, local_best_solution);
                     maybe_local_best_solution = null;
                 }
@@ -227,16 +227,14 @@ pub const App = struct {
             return Error.IterationsTooLow;
         var best_solution: ?Solution = null;
         std.debug.print("Regen count: {},  iterations per regen {}\n", .{ self.regen_count, self.iterations });
-        var mutex = std.Thread.Mutex{};
+        var mutex: std.Io.Mutex = .init;
 
-        var thread_pool: std.Thread.Pool = undefined;
-        try thread_pool.init(.{ .allocator = self.env.a, .n_jobs = 32 });
-        defer thread_pool.deinit();
+        // &todo, &improv: Add thread pool again
         for (0..self.regen_count) |regen| {
             // Cb.call will deinit/destroy itself
             const cb = try self.env.a.create(Cb);
             cb.init(self, regen, self.iterations, &best_solution, &mutex);
-            try thread_pool.spawn(Cb.call, .{cb});
+            cb.call();
         }
     }
 
@@ -268,7 +266,7 @@ pub const App = struct {
 
     // Pass all required arguments necessary for string interpolation of filename via args
     fn writeSolution(self: Self, solution: Solution, comptime filename: []const u8, args: anytype) !void {
-        var output_log = rubr.Log{};
+        var output_log = rubr.Log{ .io = self.env.io };
         output_log.init();
         defer output_log.deinit();
 
@@ -666,7 +664,7 @@ pub const App = struct {
     };
     fn createLessons(self: *Self, split_strategy: SplitStrategy) ![]mdl.Lesson {
         // Split the Courses into single Lessons, making sure they do not exceed the classroom_capacity
-        var single_lessons = std.ArrayList(mdl.Lesson){};
+        var single_lessons = std.ArrayList(mdl.Lesson).empty;
         defer single_lessons.deinit(self.env.a);
         {
             for (self.model.courses, 0..) |*course, course_ix| {

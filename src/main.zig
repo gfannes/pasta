@@ -3,7 +3,7 @@ const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
 const app = @import("app.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var env_inst = rubr.Env.Instance{};
     env_inst.init();
     defer env_inst.deinit();
@@ -12,7 +12,7 @@ pub fn main() !void {
 
     var config = cfg.Config.init(env);
     defer config.deinit();
-    try config.parse();
+    try config.parse(init.minimal.args);
 
     env_inst.log.setLevel(config.verbose);
 

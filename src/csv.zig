@@ -1,4 +1,5 @@
 const std = @import("std");
+const rubr = @import("rubr.zig");
 
 pub const Error = error{
     CouldNotReadAllData,
@@ -12,20 +13,20 @@ pub const Table = struct {
     };
     const Row = []Cell;
 
-    a: std.mem.Allocator,
+    env: rubr.Env,
     content: []const u8 = &.{},
     newline: []const u8 = &.{},
     dim: Dim = .{},
     rows: []Row = &.{},
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a };
+    pub fn init(env: rubr.Env) Self {
+        return Self{ .env = env };
     }
     pub fn deinit(self: *Self) void {
-        self.a.free(self.content);
+        self.env.a.free(self.content);
         for (self.rows) |row|
-            self.a.free(row);
-        self.a.free(self.rows);
+            self.env.a.free(row);
+        self.env.a.free(self.rows);
     }
 
     pub fn loadFromFile(self: *Self, fp: []const u8) !void {
@@ -37,14 +38,14 @@ pub const Table = struct {
     }
 
     fn readContent(self: *Self, fp: []const u8) !void {
-        var file = try std.fs.cwd().openFile(fp, .{ .mode = .read_only });
-        defer file.close();
+        var file = try std.Io.Dir.cwd().openFile(self.env.io, fp, .{ .mode = .read_only });
+        defer file.close(self.env.io);
 
-        const stat = try file.stat();
-        const buf = try self.a.alloc(u8, stat.size);
-        errdefer self.a.free(buf);
+        const stat = try file.stat(self.env.io);
+        const buf = try self.env.a.alloc(u8, stat.size);
+        errdefer self.env.a.free(buf);
 
-        if (try file.read(buf) != stat.size)
+        if (try file.readPositionalAll(self.env.io, buf, 0) != stat.size)
             return Error.CouldNotReadAllData;
 
         self.content = buf;
@@ -71,9 +72,9 @@ pub const Table = struct {
         }
     }
     fn allocateCells(self: *Self) !void {
-        self.rows = try self.a.alloc(Row, self.dim.rows);
+        self.rows = try self.env.a.alloc(Row, self.dim.rows);
         for (self.rows) |*row| {
-            row.* = try self.a.alloc(Cell, self.dim.cols);
+            row.* = try self.env.a.alloc(Cell, self.dim.cols);
             @memset(row.*, .{});
         }
     }

@@ -42,8 +42,8 @@ pub const Config = struct {
     }
     pub fn deinit(_: *Self) void {}
 
-    pub fn parse(self: *Self) !void {
-        try self.args.setupFromOS();
+    pub fn parse(self: *Self, os_args: std.process.Args) !void {
+        try self.args.setupFromOS(os_args);
 
         self.exe_name = (self.args.pop() orelse return Error.CouldNotFindExecutable).arg;
 

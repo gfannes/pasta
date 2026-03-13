@@ -243,7 +243,7 @@ pub const Schedule = struct {
             }
         }
 
-        var lessons = std.ArrayList(Lesson){};
+        var lessons = std.ArrayList(Lesson).empty;
         for (self.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
                 if (maybe_lesson) |lesson| {
