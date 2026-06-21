@@ -120,7 +120,7 @@ pub const App = struct {
     }
 
     pub fn learn(self: *Self) !void {
-        const Cb = struct {
+        const Job = struct {
             const My = @This();
 
             app: *Self,
@@ -130,21 +130,7 @@ pub const App = struct {
             maybe_global_best_solution: *?Solution,
             mutex: *std.Io.Mutex,
 
-            pub fn init(my: *My, app: *Self, regen: usize, iterations: usize, global_best_solution: *?Solution, mutex: *std.Io.Mutex) void {
-                my.app = app;
-                my.regen = regen;
-                my.env = app.env;
-                my.iterations = iterations;
-                my.maybe_global_best_solution = global_best_solution;
-                my.mutex = mutex;
-            }
-            pub fn deinit(my: *My) void {
-                _ = my;
-            }
-            pub fn call(my: *My) void {
-                my.call_() catch {};
-            }
-            fn call_(my: *My) !void {
+            pub fn call(my: My) !void {
                 var maybe_local_best_solution: ?Solution = null;
 
                 for (0..my.iterations) |iteration| {
@@ -214,10 +200,9 @@ pub const App = struct {
                     try my.app.solutions.append(my.env.a, local_best_solution);
                     maybe_local_best_solution = null;
                 }
-
-                const a = my.env.a;
-                my.deinit();
-                a.destroy(my);
+            }
+            pub fn format(my: My, w: *std.Io.Writer) !void {
+                try w.print("[Job](regen:{})", .{my.regen});
             }
         };
 
@@ -229,13 +214,23 @@ pub const App = struct {
         std.debug.print("Regen count: {},  iterations per regen {}\n", .{ self.regen_count, self.iterations });
         var mutex: std.Io.Mutex = .init;
 
-        // &&mt
-        // &todo, &improv: Add thread pool again
-        for (0..self.regen_count) |regen| {
-            // Cb.call will deinit/destroy itself
-            const cb = try self.env.a.create(Cb);
-            cb.init(self, regen, self.iterations, &best_solution, &mutex);
-            cb.call();
+        {
+            var thread_pool = rubr.thread.Pool(Job){ .env = self.env };
+            try thread_pool.init(.{});
+            defer thread_pool.deinit();
+
+            // &&mt
+            // &todo, &improv: Add thread pool again
+            for (0..self.regen_count) |regen| {
+                try thread_pool.append(Job{
+                    .app = self,
+                    .regen = regen,
+                    .env = self.env,
+                    .iterations = self.iterations,
+                    .maybe_global_best_solution = &best_solution,
+                    .mutex = &mutex,
+                });
+            }
         }
     }
 

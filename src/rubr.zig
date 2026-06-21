@@ -1,4 +1,4 @@
-// Output from `rake export[idx,cli,Env]` from https://github.com/gfannes/rubr from 2026-03-15
+// Output from `rake export[idx,cli,Env,thread]` from https://github.com/gfannes/rubr from 2026-06-21
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -197,12 +197,16 @@ pub const cli = struct {
     
             self.argv = try a.alloc([]const u8, os_args.vector.len);
     
-            var it = os_args.iterate();
+            var it = try os_args.iterateAllocator(self.env.a);
+            defer it.deinit();
             var ix: usize = 0;
             while (it.next()) |os_arg| {
                 self.argv[ix] = try a.dupe(u8, os_arg);
                 ix += 1;
             }
+    
+            // This is necessary for Windows: os_args.vector.len is too long.
+            self.argv.len = ix;
         }
         pub fn setupFromData(self: *Self, argv: []const []const u8) !void {
             const a = self.env.aa;
@@ -217,11 +221,17 @@ pub const cli = struct {
             if (self.argv.len == 0) return null;
     
             const a = self.env.aa;
-            const arg = a.dupe(u8, std.mem.sliceTo(self.argv[0], 0)) catch return null;
+            const arg = a.dupe(u8, self.argv[0]) catch return null;
             self.argv.ptr += 1;
             self.argv.len -= 1;
     
             return Arg{ .arg = arg };
+        }
+    
+        // Can only be called when there was something popped first
+        pub fn unpop(self: *Self) void {
+            self.argv.ptr -= 1;
+            self.argv.len += 1;
         }
     };
     
@@ -328,6 +338,15 @@ pub const Env = struct {
         }
     };
     
+    pub fn for_ut() Env_ {
+        const ut = std.testing;
+        return .{
+            .a = ut.allocator,
+            .aa = ut.allocator,
+            .io = ut.io,
+        };
+    }
+    
     pub fn duration_ns(env: Env_) i96 {
         const inst: *const Instance = @alignCast(@fieldParentPtr("log", env.log));
         return inst.duration_ns();
@@ -426,6 +445,19 @@ pub const Log = struct {
         self.initWriter();
     }
     
+    pub fn toStdout(self: *Self) !void {
+        try self.closeWriter();
+    
+        self._file = std.Io.File.stdout();
+        self.initWriter();
+    }
+    pub fn toStderr(self: *Self) !void {
+        try self.closeWriter();
+    
+        self._file = std.Io.File.stderr();
+        self.initWriter();
+    }
+    
     pub fn setLevel(self: *Self, lvl: usize) void {
         self._lvl = lvl;
     }
@@ -464,6 +496,82 @@ pub const Log = struct {
             self._file.close(self.io);
             self._do_close = false;
         }
+    }
+    
+};
+
+// Export from 'src/thread.zig'
+pub const thread = struct {
+    // For now, Job contains the data to work on and how to work on it.
+    // Maybe that should be split into Data and Worker oneday.
+    // Job should be a POD: no lifetime management and byte-copy.
+    pub fn Pool(Job: type) type {
+        return struct {
+            pub const Self = @This();
+    
+            env: Env,
+    
+            queue_buffer: std.ArrayList(Job) = .empty,
+            queue: std.Io.Queue(Job) = undefined,
+            threads: std.ArrayList(std.Thread) = .empty,
+    
+            do_log: bool = false,
+    
+            pub const Options = struct {
+                size: ?usize = null,
+            };
+            pub fn init(self: *Self, options: Options) !void {
+                const size = options.size orelse try std.Thread.getCpuCount();
+    
+                try self.queue_buffer.resize(self.env.a, size);
+                self.queue = .init(self.queue_buffer.items);
+    
+                try self.threads.resize(self.env.a, size);
+                for (self.threads.items, 0..) |*thrd, ix0| {
+                    thrd.* = try std.Thread.spawn(.{}, worker, .{ self, ix0 });
+                }
+            }
+            pub fn deinit(self: *Self) void {
+                self.queue.close(self.env.io);
+    
+                for (self.threads.items) |thrd| {
+                    thrd.join();
+                }
+                self.threads.deinit(self.env.a);
+    
+                self.queue_buffer.deinit(self.env.a);
+            }
+    
+            pub fn append(self: *Self, job: Job) !void {
+                try self.queue.putOne(self.env.io, job);
+            }
+    
+            fn worker(self: *Self, ix: usize) !void {
+                if (self.do_log)
+                    std.debug.print("thread.Pool.worker {} starting\n", .{ix});
+    
+                var iteration: u64 = 0;
+                while (true) {
+                    if (self.queue.getOne(self.env.io)) |job| {
+                        if (self.do_log)
+                            std.debug.print("thread.Pool.worker {}-{} found job {f}\n", .{ ix, iteration, job });
+    
+                        try job.call();
+                    } else |err| {
+                        if (self.do_log)
+                            std.debug.print("thread.Pool.worker {}-{} {}\n", .{ ix, iteration, err });
+                        if (err == error.Closed)
+                            return;
+                        return err;
+                    }
+    
+                    iteration += 1;
+                }
+    
+                if (self.do_log)
+                    std.debug.print("thread.Pool.worker {} stopping\n", .{ix});
+            }
+        };
     }
     
 };
