@@ -219,8 +219,6 @@ pub const App = struct {
             try thread_pool.init(.{});
             defer thread_pool.deinit();
 
-            // &&mt
-            // &todo, &improv: Add thread pool again
             for (0..self.regen_count) |regen| {
                 try thread_pool.append(Job{
                     .app = self,
