@@ -26,20 +26,33 @@ pub const Solution = struct {
 
     schedule: mdl.Schedule,
     unfit: usize,
+    lesuren: usize = 0,
     entropy: f64 = 0.0,
 
     pub fn deinit(self: *Self) void {
         self.schedule.deinit();
     }
     pub fn copy(self: Self) !Self {
-        return Self{ .schedule = try self.schedule.copy(), .unfit = self.unfit, .entropy = self.entropy };
+        return Self{ .schedule = try self.schedule.copy(), .unfit = self.unfit, .lesuren = self.lesuren, .entropy = self.entropy };
     }
 
     fn isBetterThan(self: Self, other: Self) bool {
-        return self.unfit < other.unfit or (self.unfit == other.unfit and self.entropy > other.entropy);
+        if (self.unfit < other.unfit) {
+            return true;
+        } else if (self.unfit == other.unfit) {
+            if (self.lesuren < other.lesuren) {
+                return true;
+            } else if (self.lesuren == other.lesuren) {
+                return self.entropy > other.entropy;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
-    fn computeEntropy(self: *Self) void {
+    fn computeCost(self: *Self) void {
         var total: usize = 0;
         for (self.schedule.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
@@ -49,10 +62,12 @@ pub const Solution = struct {
             }
         }
 
+        // self.lesuren = 0;
         self.entropy = 0.0;
         for (self.schedule.hour__class__lesson) |class__lesson| {
             for (class__lesson) |maybe_lesson| {
                 if (maybe_lesson) |lesson| {
+                    // self.lesuren += 1;
                     const prob: f64 = @as(f64, @floatFromInt(lesson.students)) / @as(f64, @floatFromInt(total));
                     self.entropy += -prob * @log(prob);
                 }
@@ -145,14 +160,14 @@ pub const App = struct {
 
                     var maybe_solution = my.app.fit(lessons, max_step_factor) catch null;
                     if (maybe_solution) |*solution| {
-                        solution.computeEntropy();
+                        solution.computeCost();
                         if (maybe_local_best_solution) |*local_best_solution| {
                             defer solution.deinit();
                             if (solution.isBetterThan(local_best_solution.*)) {
                                 std.mem.swap(Solution, solution, local_best_solution);
 
                                 if (my.env.log.level(1)) |w|
-                                    try w.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                    try w.print("Found better solution in regen {} iteration {}: unfit {} lesuren {} entropy {}\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.lesuren, local_best_solution.entropy });
 
                                 try my.mutex.lock(my.env.io);
                                 defer my.mutex.unlock(my.env.io);
@@ -161,13 +176,13 @@ pub const App = struct {
                                         global_best_solution.deinit();
                                         my.maybe_global_best_solution.* = try local_best_solution.copy();
                                         try local_best_solution.schedule.write(my.env.log.writer(), my.app.model, .{});
-                                        try my.env.log.print("Found better solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                        try my.env.log.print("Found better solution in regen {} iteration {}: unfit {} lesuren {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.lesuren, local_best_solution.entropy });
                                         try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
                                     }
                                 } else {
                                     my.maybe_global_best_solution.* = try local_best_solution.copy();
                                     try local_best_solution.schedule.write(my.env.log.writer(), my.app.model, .{});
-                                    try my.env.log.print("First solution in regen {} iteration {}: unfit {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.entropy });
+                                    try my.env.log.print("First solution in regen {} iteration {}: unfit {} lesuren {} entropy {}\n\n", .{ my.regen, iteration, local_best_solution.unfit, local_best_solution.lesuren, local_best_solution.entropy });
                                     try my.app.writeSolution(local_best_solution.*, "best-solution.csv", .{});
                                 }
                             }
@@ -273,7 +288,7 @@ pub const App = struct {
             write_config.mode = mdl.Schedule.WriteMode.Csv;
         }
 
-        try output_log.print("Unfit,{},Entropy,{}\n", .{ solution.unfit, solution.entropy });
+        try output_log.print("Unfit,{},Lesuren,{},Entropy,{}\n", .{ solution.unfit, solution.lesuren, solution.entropy });
         try solution.schedule.write(output_log.writer(), self.model, write_config);
     }
 
@@ -316,9 +331,10 @@ pub const App = struct {
             }
         }
 
-        if (fit_data.maybe_solution) |solution| {
+        if (fit_data.maybe_solution) |*solution| {
             defer fit_data.maybe_solution = null;
-            return solution;
+            solution.lesuren = all_lessons.len;
+            return solution.*;
         }
 
         return null;

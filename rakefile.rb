@@ -22,7 +22,10 @@ end
 desc 'Learn'
 task learn: :install do
     # sh('pasta -i 2025/5de-jaar.csv -o 5de-jaar -r 1000')
-    sh('pasta -i 2026/6de-jaar.csv -o 6de-jaar -r 1000')
+    # sh('pasta -i 2026/6de-jaar.csv -o 6de-jaar -r 1000')
+    sh('pasta -i 2026/6de-jaar_1.csv -o 6de-jaar_1 -r 1000')
+    # sh('pasta -i 2026/6de-jaar_2.csv -o 6de-jaar_2 -r 100')
+    # sh('pasta -i 2026/6de-jaar_3.csv -o 6de-jaar_3 -r 100')
 end
 
 desc('Clean')
