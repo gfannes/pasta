@@ -84,10 +84,10 @@ pub const Config = struct {
         try w.print("    -s/--min-students COUNT Minimal number of students before a new Lesson is created [optional, default is {}]\n", .{Default.min_students});
         try w.print("    -S/--max-students COUNT Maximal number of students before a new Lesson is created [optional, default is {}]\n", .{Default.max_students});
         const description =
-            \\After reading the input configuration, Courses are split into Lessons, given to random groups of Classes are created with size between 20 and 26 students.
+            \\After reading the input configuration, Courses are split into Lessons, given to random groups of Classes with a size between 20 and 26 students.
             \\The number of different random splits that are tested is controlled by the '--regen' parameter. Note that each different random split can be processed on a different CPU.
             \\Once a set of Lessons is derived for each Course, only the Lessons that are not given to a complete ClassGroup will be fitted into the schedule.
-            \\Before trying to fit those Lessons into the Schedule, they are randomized.
+            \\Before trying to fit those Lessons into the Schedule, their order is randomized.
             \\The number of randomized reorders that are tested within a given set of Lessons is controlled by the '--iterations' parameter.
             \\For a given set and order of Lessons, backtracking is used to try and fill a Schedule:
             \\- When each Hour in the Schedule for a ClassGroup is either fully filled-in or empty, the first unprocessed Lesson is placed in the first available Hour that fits the Lesson.
@@ -95,7 +95,7 @@ pub const Config = struct {
             \\
             \\To quickly find a good solution, preferrably with 0 unfit Lessons, it is:
             \\- Important to test enough different random splits of Courses into Lessons. Since such a random split can be processed in parallel, the '--regen' parameter should be set to at least the number of available CPUs in the system.
-            \\- Important to stop testing random splits that lead to poor solutions. For this, if a given random split does not find a reasonable good solution within the first 500 iterations, it is not processed further.
+            \\- Important to stop testing random splits that lead to poor solutions. For this, if a given random split does not find a reasonably good solution within the first 500 iterations, it is not processed further.
             \\- If a random split survives the first 500 iterations, the '--max-step' is multiplied by 10 to give the backtracking algorithm more steps to find a solution.
             \\
             \\The input file must be a regular comma-separated value file. The first 3 columns and rows indicate the type, name and count of the respective cells.
