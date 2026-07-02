@@ -14,6 +14,7 @@ pub const Error = error{
     Stop,
     RegenCountTooLow,
     IterationsTooLow,
+    OnlyOneConstraintSupported,
 };
 
 const Max = struct {
@@ -128,6 +129,15 @@ pub const App = struct {
         self.count = try deriveCounts(self.lesson_table, self.env.log);
         try self.model.alloc(self.count);
         try self.loadData();
+
+        if (false) {
+            for (self.model.constraints.items, 0..) |constraint, ix| {
+                try self.env.stdout.print("[Constraint](ix:{})(name:{s})\n", .{ ix, constraint.name });
+            }
+            for (self.model.courses) |course| {
+                try self.env.stdout.print("[Course](name:{s})(constraint:0x{x})\n", .{ course.name, course.constraints.mask });
+            }
+        }
 
         if (self.output_dir) |output_dir| {
             try std.Io.Dir.cwd().createDirPath(self.env.io, output_dir);
@@ -424,10 +434,20 @@ pub const App = struct {
                         continue;
                     }
 
-                    const section_fits_in_schedule = lesson.classes.mask & schedule.hour__classes[gap.hour].mask == 0;
-                    if (!section_fits_in_schedule)
-                        // This Lesson does not fit for the given Hour
-                        continue;
+                    {
+                        const section_fits_in_schedule = lesson.classes.mask & schedule.hour__classes[gap.hour].mask == 0;
+                        if (!section_fits_in_schedule)
+                            // This Lesson does not fit for the given Hour
+                            continue;
+                    }
+
+                    {
+                        const section_fits_constraints = lesson.constraints.mask & schedule.hour__constraints[gap.hour].mask == 0;
+                        if (!section_fits_constraints) {
+                            // This Lesson does not fit the constraints that are already present
+                            continue;
+                        }
+                    }
 
                     const section_fills_gap = switch (fill_strategy) {
                         FillStrategy.Complete => lesson.classes.mask & gap.classes.mask == gap.classes.mask,
@@ -557,6 +577,7 @@ pub const App = struct {
 
         var class__col = try self.env.a.alloc(usize, self.count.classes);
         defer self.env.a.free(class__col);
+        var maybe_constraint_col: ?usize = null;
         {
             var class_ix: usize = 0;
             for (self.lesson_table.rows[0][3..], 3..) |cell, col_ix| {
@@ -567,6 +588,11 @@ pub const App = struct {
                             class__col[class_ix] = col_ix;
                         }
                     }
+                }
+                if (std.mem.eql(u8, cell.str, "constraint")) {
+                    if (maybe_constraint_col != null)
+                        return error.OnlyOneConstraintSupported;
+                    maybe_constraint_col = col_ix;
                 }
             }
             std.debug.assert(class_ix == self.count.classes);
@@ -587,6 +613,22 @@ pub const App = struct {
                 if (std.mem.eql(u8, row[0].str, "course")) {
                     defer course_ix += 1;
                     course__row[course_ix] = row_ix;
+
+                    if (maybe_constraint_col) |col_ix| {
+                        const name = self.lesson_table.rows[row_ix][col_ix].str;
+                        if (name.len > 0) {
+                            var found: bool = false;
+                            for (self.model.constraints.items) |constraint| {
+                                if (std.mem.eql(u8, name, constraint.name)) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                try self.model.constraints.append(self.env.a, .{ .name = name });
+                            }
+                        }
+                    }
                 }
             }
             std.debug.assert(group_ix == self.count.groups);
@@ -663,6 +705,17 @@ pub const App = struct {
                         }
                     }
                 }
+
+                if (maybe_constraint_col) |col_ix| {
+                    const name = row[col_ix].str;
+                    if (name.len > 0) {
+                        for (self.model.constraints.items, 0..) |constraint, ix| {
+                            if (std.mem.eql(u8, name, constraint.name)) {
+                                course.constraints.add(ix);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -697,6 +750,7 @@ pub const App = struct {
                         try single_lessons.append(self.env.a, mdl.Lesson{
                             .course = mdl.Course.Ix.init(course_ix),
                             .classes = course.classes,
+                            .constraints = course.constraints,
                             .students = students,
                         });
                     },
@@ -718,12 +772,13 @@ pub const App = struct {
                                 try single_lessons.append(self.env.a, mdl.Lesson{
                                     .course = mdl.Course.Ix.init(course_ix),
                                     .classes = classes,
+                                    .constraints = course.constraints,
                                     .students = students,
                                 });
                             }
                         }
 
-                        // Repeatable merge the two smallest Lessons
+                        // Repeat: merge the two smallest Lessons
                         while (true) {
                             const my_lessons = single_lessons.items[lessons_start..];
                             if (my_lessons.len < 2)
@@ -770,6 +825,7 @@ pub const App = struct {
                             try single_lessons.append(self.env.a, mdl.Lesson{
                                 .course = mdl.Course.Ix.init(course_ix),
                                 .classes = course.classes,
+                                .constraints = course.constraints,
                                 .students = students,
                             });
                         } else {
@@ -819,6 +875,7 @@ pub const App = struct {
                                     maybe_lesson = mdl.Lesson{
                                         .course = mdl.Course.Ix.init(course_ix),
                                         .classes = mdl.ClassSet{ .mask = @as(u64, 1) << @intCast(class_ix.ix) },
+                                        .constraints = course.constraints,
                                         .students = class.count,
                                     };
                                 }

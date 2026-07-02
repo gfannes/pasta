@@ -19,6 +19,7 @@ pub const Model = struct {
     classes: []Class = &.{},
     groups: []Group = &.{},
     courses: []Course = &.{},
+    constraints: std.ArrayList(Constraint) = .empty,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Model{ .a = a };
@@ -30,6 +31,8 @@ pub const Model = struct {
 
         self.a.free(self.groups);
         self.a.free(self.courses);
+
+        self.constraints.deinit(self.a);
     }
     pub fn alloc(self: *Self, count: Count) !void {
         self.classes = try self.a.alloc(Class, count.classes);
@@ -74,6 +77,8 @@ pub const Model = struct {
                 var it = course.classes.iterator();
                 while (it.next()) |class_ix|
                     try w.print(" {s}", .{class_ix.cptr(self.classes).name});
+                if (course.constraints.mask != 0)
+                    try w.print(" constraint 0x{x}", .{course.constraints.mask});
                 try w.print("\n", .{});
             }
         }
@@ -86,6 +91,7 @@ pub const Schedule = struct {
     a: std.mem.Allocator,
     hour__class__lesson: [][]?Lesson = &.{},
     hour__classes: []ClassSet = &.{},
+    hour__constraints: []ConstraintSet = &.{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
@@ -95,6 +101,7 @@ pub const Schedule = struct {
             self.a.free(e);
         self.a.free(self.hour__class__lesson);
         self.a.free(self.hour__classes);
+        self.a.free(self.hour__constraints);
     }
     pub fn copy(self: Self) !Self {
         var ret = Self.init(self.a);
@@ -105,8 +112,13 @@ pub const Schedule = struct {
             dst.* = try ret.a.alloc(?Lesson, src.len);
             std.mem.copyForwards(?Lesson, dst.*, src);
         }
+
         ret.hour__classes = try ret.a.alloc(ClassSet, self.hour__classes.len);
         std.mem.copyForwards(ClassSet, ret.hour__classes, self.hour__classes);
+
+        ret.hour__constraints = try ret.a.alloc(ConstraintSet, self.hour__constraints.len);
+        std.mem.copyForwards(ConstraintSet, ret.hour__constraints, self.hour__constraints);
+
         return ret;
     }
     pub fn alloc(self: *Self, hours: usize, classes: usize) !void {
@@ -115,8 +127,12 @@ pub const Schedule = struct {
             class__lesson.* = try self.a.alloc(?Lesson, classes);
             @memset(class__lesson.*, null);
         }
+
         self.hour__classes = try self.a.alloc(ClassSet, hours);
         @memset(self.hour__classes, ClassSet{});
+
+        self.hour__constraints = try self.a.alloc(ConstraintSet, hours);
+        @memset(self.hour__constraints, ConstraintSet{});
     }
     pub fn assign(self: *Self, other: Self) !void {
         if (other.hour__class__lesson.len != self.hour__class__lesson.len)
@@ -126,6 +142,7 @@ pub const Schedule = struct {
             std.mem.copyForwards(?Lesson, dst, src);
         }
         std.mem.copyForwards(ClassSet, self.hour__classes, other.hour__classes);
+        std.mem.copyForwards(ConstraintSet, self.hour__constraints, other.hour__constraints);
     }
 
     pub fn isEmpty(self: Schedule, hour: usize) bool {
@@ -154,10 +171,12 @@ pub const Schedule = struct {
             while (it.next()) |class_ix|
                 class__lesson[class_ix.ix] = lesson;
             self.hour__classes[hour].mask |= lesson.classes.mask;
+            self.hour__constraints[hour].mask |= lesson.constraints.mask;
         } else {
             while (it.next()) |class_ix|
                 class__lesson[class_ix.ix] = null;
             self.hour__classes[hour].mask &= ~lesson.classes.mask;
+            self.hour__constraints[hour].mask &= ~lesson.constraints.mask;
         }
     }
 
@@ -341,6 +360,7 @@ pub const Course = struct {
     name: []const u8 = &.{},
     hours: usize = 0,
     classes: ClassSet = .{},
+    constraints: ConstraintSet = .{},
 };
 
 pub const Lesson = struct {
@@ -348,6 +368,7 @@ pub const Lesson = struct {
 
     course: Course.Ix,
     classes: ClassSet = .{},
+    constraints: ConstraintSet = .{},
     students: usize = 0, // &todo remove this field
     section: usize = 0, // A Course is split into different sections, each section respecting the classroom_capacity
     hour: usize = 0,
@@ -361,6 +382,18 @@ pub const Hour = struct {
 
 pub const Constraint = struct {
     const Self = @This();
+
+    name: []const u8 = &.{},
+};
+
+pub const ConstraintSet = struct {
+    const Self = @This();
+
+    mask: u64 = 0,
+
+    pub fn add(self: *Self, ix: usize) void {
+        self.mask |= @as(u64, 1) << @intCast(ix);
+    }
 };
 
 pub const Gap = struct {
