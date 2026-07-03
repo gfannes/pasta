@@ -31,8 +31,10 @@ task learn: :install do
     # sh('pasta -i 2026/5c.csv -o 5de-jaar_c -r 1000000 -s 16 -S 26')
     # sh('pasta -i 2026/5aa.csv -o 5de-jaar_aa -r 40000 -s 15 -S 26')
     # sh('pasta -i 2026/5d.csv -o 5de-jaar_1 -r 10000 -s 20 -S 26')
-    # sh('pasta -i 2026/5a4.csv -o 5de-jaar_1 -r 10000 -s 20 -S 26')
-    sh('pasta -i 2026/5b4.csv -o 5de-jaar_1 -r 10000 -s 20 -S 26')
+    sh('pasta -i 2026/5b4.csv -o output/2026/5b4 -r 100000 -s 20 -S 26')
+    sh('pasta -i 2026/5a4.csv -o output/2026/5a4 -r 100000 -s 20 -S 26')
+    sh('pasta -i 2026/5b4.csv -o output/2026/5b4 -r 50000 -s 17 -S 27')
+    sh('pasta -i 2026/5a4.csv -o output/2026/5a4 -r 50000 -s 17 -S 27')
 end
 
 desc('Clean')
