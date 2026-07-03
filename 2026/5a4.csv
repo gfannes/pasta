@@ -1,4 +1,4 @@
-type,,,,class,class,class,class,class,class,class,class,class,class,class,class,class,constraint,aantal cursussen,aantal lln per cursus,aantal lln,
+type,,,class,class,class,class,class,class,class,class,class,class,class,class,class,class,constraint,aantal cursussen,aantal lln per cursus,aantal lln,
 ,naam,,5HUWA,5HUWB,5WWI6A,5WWI6B,5EMT,5EWI,5MWE,5WWI8,5MT,5LMT,5GL,5LWE,5LWI6,5LWI8,leerkracht,,,,
 ,,aantal,20,11,11,10,7,11,4,9,7,6,3,3,1,1,,,,104,
 ,,BP,,,4,4,,1,,,,,,,,,,,,9,
