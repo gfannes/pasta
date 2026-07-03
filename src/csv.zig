@@ -3,6 +3,8 @@ const rubr = @import("rubr.zig");
 
 pub const Error = error{
     CouldNotReadAllData,
+    ExpectedDelimiter,
+    CouldNotFindClosingQuote,
 };
 
 pub const Table = struct {
@@ -32,7 +34,7 @@ pub const Table = struct {
     pub fn loadFromFile(self: *Self, fp: []const u8) !void {
         try self.readContent(fp);
         self.deriveNewline();
-        self.deriveDim();
+        try self.deriveDim();
         try self.allocateCells();
         try self.parseData();
     }
@@ -50,27 +52,42 @@ pub const Table = struct {
 
         self.content = buf;
     }
+
     fn deriveNewline(self: *Self) void {
         self.newline = if (std.mem.indexOf(u8, self.content, "\r\n") != null) "\r\n" else "\n";
     }
-    fn deriveDim(self: *Self) void {
+
+    fn deriveDim(self: *Self) !void {
         self.newline = if (std.mem.indexOf(u8, self.content, "\r\n") != null) "\r\n" else "\n";
 
         self.dim = .{};
-        var row_it = std.mem.splitSequence(u8, self.content, self.newline);
-        while (row_it.next()) |row| {
-            if (row.len == 0)
+
+        var strange = rubr.strng.Strange{ .content = self.content };
+        while (strange.popLine()) |line| {
+            if (line.len == 0)
                 continue;
 
             self.dim.rows += 1;
 
             var cols: usize = 0;
-            var col_it = std.mem.splitScalar(u8, row, ',');
-            while (col_it.next()) |_|
+            var line_strng = rubr.strng.Strange{ .content = line };
+            while (!line_strng.empty()) {
                 cols += 1;
+                if (line_strng.popChar('"')) {
+                    _ = line_strng.popTo('"');
+                    if (!line_strng.empty() and !line_strng.popChar(','))
+                        return error.ExpectedDelimiter;
+                } else {
+                    if (line_strng.popTo(',') == null) {
+                        _ = line_strng.popAll();
+                    }
+                }
+            }
+
             self.dim.cols = @max(self.dim.cols, cols);
         }
     }
+
     fn allocateCells(self: *Self) !void {
         self.rows = try self.env.a.alloc(Row, self.dim.rows);
         for (self.rows) |*row| {
@@ -78,18 +95,32 @@ pub const Table = struct {
             @memset(row.*, .{});
         }
     }
+
     fn parseData(self: *Self) !void {
-        var row_it = std.mem.splitSequence(u8, self.content, self.newline);
         var rix: usize = 0;
-        while (row_it.next()) |row| {
-            if (row.len == 0)
+        var strange = rubr.strng.Strange{ .content = self.content };
+        while (strange.popLine()) |line| {
+            if (line.len == 0)
                 continue;
             defer rix += 1;
 
-            var col_it = std.mem.splitScalar(u8, row, ',');
             var cix: usize = 0;
-            while (col_it.next()) |cell_str| {
+            var line_strng = rubr.strng.Strange{ .content = line };
+            while (!line_strng.empty()) {
                 defer cix += 1;
+
+                var cell_str: []const u8 = &.{};
+                if (line_strng.popChar('"')) {
+                    cell_str = line_strng.popTo('"') orelse return error.CouldNotFindClosingQuote;
+                    if (!line_strng.empty() and !line_strng.popChar(','))
+                        return error.ExpectedDelimiter;
+                } else {
+                    if (line_strng.popTo(',')) |str| {
+                        cell_str = str;
+                    } else if (line_strng.popAll()) |str| {
+                        cell_str = str;
+                    }
+                }
 
                 const cell = Cell{ .str = cell_str, .int = std.fmt.parseInt(i64, cell_str, 10) catch null };
                 self.rows[rix][cix] = cell;
